@@ -4,6 +4,11 @@ import time
 import webbrowser
 import json
 import threading
+import numpy as np
+import wave
+import struct
+import tempfile
+from scipy.io import wavfile  # For tone generation
 
 # Initialize eel with the web folder
 eel.init('/home/kavinda/Desktop/2025/yogeshwari/keyboard_ps/xy osci/web')
@@ -11,6 +16,49 @@ eel.init('/home/kavinda/Desktop/2025/yogeshwari/keyboard_ps/xy osci/web')
 # Global variables to track state
 is_playing = False
 audio_loaded = False
+active_tones = {}  # Track currently playing tones
+
+# Musical note frequencies
+NOTE_FREQUENCIES = {
+    'C': 261.63,  # C4
+    'C#': 277.18,
+    'D': 293.66,
+    'Eb': 311.13,
+    'E': 329.63,
+    'F': 349.23,
+    'F#': 369.99,
+    'G': 392.00,
+    'G#': 415.30,
+    'A': 440.00,
+    'Bb': 466.16,
+    'B': 493.88
+}
+
+# Audio settings
+SAMPLE_RATE = 44100  # samples per second
+BUFFER_SIZE = 1024   # buffer size for audio
+AMPLITUDE = 0.3      # volume (0.0 to 1.0)
+
+# Key to note mapping
+KEY_TO_NOTE = {
+    'KeyA': 'C',
+    'KeyW': 'C#',
+    'KeyS': 'D',
+    'KeyE': 'Eb',
+    'KeyD': 'E',
+    'KeyF': 'F',
+    'KeyT': 'F#',
+    'KeyG': 'G',
+    'KeyY': 'G#',
+    'KeyH': 'A',
+    'KeyU': 'Bb',
+    'KeyJ': 'B',
+    'KeyK': 'C',  # C5 (one octave up)
+}
+
+# Create tone cache directory
+TONE_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web/audio/tones')
+os.makedirs(TONE_CACHE_DIR, exist_ok=True)
 
 # Keyboard mapping (key -> audio file)
 keyboard_mapping = {
@@ -26,7 +74,7 @@ controls = {
     'signalGeneratorOn': False,
     'mainGain': 0.0,
     'exposureStops': 1.5,  # Increased for better visibility
-    'audioVolume': 0.0,  # Set to mute by default
+    'audioVolume': 0.5,  # Set to medium volume for tones
     'hue': 120,  # Green hue for phosphor effect
     'freezeImage': False,
     'disableFilter': False,
@@ -40,6 +88,135 @@ controls = {
     'xExpression': "sin(2*PI*a*t)*cos(2*PI*b*t)",
     'yExpression': "cos(2*PI*a*t)*cos(2*PI*b*t)",
 }
+
+# Generate a sine wave tone file
+def generate_tone(frequency, duration=1.0):
+    """Generate a sine wave tone WAV file and return its path"""
+    
+    # Check if we already have this tone cached
+    filename = f"{int(frequency)}Hz.wav"
+    filepath = os.path.join(TONE_CACHE_DIR, filename)
+    
+    if os.path.exists(filepath):
+        return f"audio/tones/{filename}"
+    
+    # Generate the tone
+    t = np.linspace(0, duration, int(SAMPLE_RATE * duration), False)
+    tone = AMPLITUDE * np.sin(2 * np.pi * frequency * t)
+    
+    # Apply envelope to avoid clicks
+    fade_duration = 0.05  # 50ms fade in/out
+    fade_samples = int(fade_duration * SAMPLE_RATE)
+    
+    # Apply fade in
+    if fade_samples > 0:
+        fade_in = np.linspace(0, 1, fade_samples)
+        tone[:fade_samples] *= fade_in
+        
+        # Apply fade out
+        fade_out = np.linspace(1, 0, fade_samples)
+        tone[-fade_samples:] *= fade_out
+    
+    # Convert to 16-bit PCM
+    tone = (tone * 32767).astype(np.int16)
+    
+    # Save as WAV file
+    wavfile.write(filepath, SAMPLE_RATE, tone)
+    
+    print(f"Generated tone file: {filepath}")
+    return f"audio/tones/{filename}"
+
+# Generate a more complex waveform combining sine waves for rich oscilloscope patterns
+def generate_xy_tone(frequency, harmonics=3, duration=1.0):
+    """Generate an XY oscilloscope pattern with harmonics"""
+    
+    # Check if we already have this tone cached
+    filename = f"xy_{int(frequency)}Hz_{harmonics}harm.wav"
+    filepath = os.path.join(TONE_CACHE_DIR, filename)
+    
+    if os.path.exists(filepath):
+        return f"audio/tones/{filename}"
+    
+    # Generate time array
+    t = np.linspace(0, duration, int(SAMPLE_RATE * duration), False)
+    
+    # Generate X and Y channels for Lissajous patterns
+    x_channel = np.zeros_like(t)
+    y_channel = np.zeros_like(t)
+    
+    # Add fundamental frequency
+    x_channel += AMPLITUDE * 0.7 * np.sin(2 * np.pi * frequency * t)
+    y_channel += AMPLITUDE * 0.7 * np.sin(2 * np.pi * frequency * 1.01 * t)  # Slightly detuned for movement
+    
+    # Add harmonics
+    for i in range(2, harmonics + 2):
+        harmonic_freq = frequency * i
+        # Different phase and amplitude for each harmonic
+        x_channel += AMPLITUDE * (0.3 / i) * np.sin(2 * np.pi * harmonic_freq * t + (i * 0.4))
+        y_channel += AMPLITUDE * (0.3 / i) * np.sin(2 * np.pi * harmonic_freq * 1.02 * t)
+    
+    # Apply envelope to avoid clicks
+    fade_duration = 0.05  # 50ms fade in/out
+    fade_samples = int(fade_duration * SAMPLE_RATE)
+    
+    if fade_samples > 0:
+        fade_in = np.linspace(0, 1, fade_samples)
+        x_channel[:fade_samples] *= fade_in
+        y_channel[:fade_samples] *= fade_in
+        
+        fade_out = np.linspace(1, 0, fade_samples)
+        x_channel[-fade_samples:] *= fade_out
+        y_channel[-fade_samples:] *= fade_out
+    
+    # Normalize to prevent clipping
+    max_val = max(np.max(np.abs(x_channel)), np.max(np.abs(y_channel)))
+    if max_val > 0:
+        x_channel = x_channel / max_val * AMPLITUDE
+        y_channel = y_channel / max_val * AMPLITUDE
+    
+    # Interleave channels and convert to 16-bit PCM
+    interleaved = np.empty((x_channel.size + y_channel.size,), dtype=x_channel.dtype)
+    interleaved[0::2] = x_channel
+    interleaved[1::2] = y_channel
+    interleaved = (interleaved * 32767).astype(np.int16)
+    
+    # Create the WAV file
+    with wave.open(filepath, 'wb') as wav_file:
+        wav_file.setnchannels(2)  # Stereo
+        wav_file.setsampwidth(2)  # 2 bytes per sample
+        wav_file.setframerate(SAMPLE_RATE)
+        wav_file.writeframes(interleaved.tobytes())
+    
+    print(f"Generated XY tone file: {filepath}")
+    return f"audio/tones/{filename}"
+
+# Generate all note tones during initialization
+def generate_all_note_tones():
+    """Pre-generate all note tones for quick access"""
+    print("Generating tone files for all notes...")
+    
+    # Simple tones
+    for note, freq in NOTE_FREQUENCIES.items():
+        generate_tone(freq)
+        
+    # XY pattern tones
+    for note, freq in NOTE_FREQUENCIES.items():
+        generate_xy_tone(freq)
+    
+    print("All tone files generated.")
+
+# Get the path to a tone file for a given note
+def get_tone_path(note, use_xy=True):
+    """Get the file path for a given note's tone"""
+    if note not in NOTE_FREQUENCIES:
+        return None
+        
+    freq = NOTE_FREQUENCIES[note]
+    
+    if use_xy:
+        return generate_xy_tone(freq)
+    else:
+        return generate_tone(freq)
 
 # Control commands
 @eel.expose
@@ -91,15 +268,38 @@ def set_keyboard_mapping(key, audio_file):
 
 @eel.expose
 def key_pressed(key, is_pressed):
-    """Handle keyboard events"""
-    if is_pressed:
-        print(f"Key pressed: {key}")
-    else:
-        print(f"Key released: {key}")
-    return True
+    """Handle keyboard events to play tones"""
+    if key in KEY_TO_NOTE:
+        note = KEY_TO_NOTE[key]
+        
+        if is_pressed:
+            # Start playing the note
+            if key not in active_tones:
+                tone_path = get_tone_path(note, use_xy=True)  # Use XY patterns
+                if tone_path:
+                    try:
+                        # Correct way to call JavaScript functions
+                        eel.playTone(key, tone_path)  # Don't add () here, Eel handles that internally
+                        active_tones[key] = note
+                        print(f"Playing {note} ({NOTE_FREQUENCIES[note]} Hz)")
+                    except Exception as e:
+                        print(f"Error playing tone: {e}")
+                    return True
+        else:
+            # Stop playing the note
+            if key in active_tones:
+                try:
+                    # Correct way to call JavaScript functions
+                    eel.stopTone(key)  # Don't add () here, Eel handles that internally
+                    del active_tones[key]
+                    print(f"Stopped {note}")
+                except Exception as e:
+                    print(f"Error stopping tone: {e}")
+                return True
+    
+    return False
 
 # Audio file handling
-@eel.expose
 def list_audio_files():
     """List all audio files in the audio directory"""
     audio_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web/audio')
@@ -154,44 +354,21 @@ def ensure_audio_file_accessible(filename):
         traceback.print_exc()
         return None
 
-def auto_map_keyboard():
-    """Automatically map keyboard keys to available audio files"""
-    # Standard keyboard key order (QWERTY layout)
-    key_rows = [
-        ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP'],
-        ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL'],
-        ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM']
-    ]
-    
-    # Number keys
-    for i in range(10):
-        key_rows[0].append(f'Digit{i}')
-    
-    # Flatten the array
-    keys = [key for row in key_rows for key in row]
-    
-    # Get available audio files
-    audio_files = list_audio_files()
-    
-    # Create mappings
-    for i, audio_file in enumerate(audio_files):
-        if i < len(keys):
-            filepath = ensure_audio_file_accessible(audio_file)
-            if filepath:
-                keyboard_mapping[keys[i]] = filepath
-                print(f"Auto-mapped {keys[i]} to {filepath}")
-    
-    print(f"Auto-mapped {min(len(audio_files), len(keys))} keys to audio files")
-    return True
-
 # JavaScript function to be exposed to Python
 @eel.expose
 def js_ready():
     """Called when JavaScript is ready"""
     print("JavaScript is ready. Setting up keyboard synthesizer...")
     try:
-        # Auto-map keyboard to available audio files
-        auto_map_keyboard()
+        # Generate tone files for all notes
+        generate_all_note_tones()
+        
+        # Setup keyboard mapping for notes
+        for key, note in KEY_TO_NOTE.items():
+            tone_path = get_tone_path(note, use_xy=True)
+            keyboard_mapping[key] = tone_path
+            
+        print("Keyboard synthesizer setup complete")
     except Exception as e:
         print(f"Error setting up keyboard synthesizer: {e}")
 
@@ -312,9 +489,8 @@ console_thread = threading.Thread(target=console_interface, daemon=True)
 console_thread.start()
 
 # Start Eel with the main HTML file
-print("Starting keyboard synthesizer")
+print("Starting keyboard synthesizer with tone generation")
 print("Access the visualizer at: http://localhost:8080")
-print("Use the console interface to control the synthesizer")
-print("Press keyboard keys to play sounds and visualize them")
+print("Press A, W, S, E, D, F, T, G, Y, H, U, J, K for piano notes")
 
 eel.start('index.html', mode=None, port=8080, block=True)
