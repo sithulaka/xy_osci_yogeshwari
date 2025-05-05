@@ -1,13 +1,18 @@
 // Controller script for interfacing with Python Eel
 
+// Flag to track initialization
+let isInitialized = false;
+
 // Audio player elements by key
 const audioPlayers = {};
-const toneAudioSources = {};  // Store audio context sources for tones
-const audioFileQueue = [];    // Queue for audio files to play from assets folder
 const keyMapping = {};
 
 // Tell Python that JavaScript is ready
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize the audio container
+    createAudioContainer();
+    
+    // A small delay to ensure everything is loaded
     setTimeout(() => {
         if (typeof eel !== 'undefined') {
             eel.js_ready();
@@ -16,6 +21,9 @@ document.addEventListener('DOMContentLoaded', function() {
             // Get initial control values
             eel.get_all_controls()(updateControls);
             
+            // Get keyboard mappings
+            eel.get_keyboard_mapping()(updateKeyboardMapping);
+            
             // Set up periodic control updates (every 500ms)
             setInterval(() => {
                 eel.get_all_controls()(updateControls);
@@ -23,83 +31,122 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }, 1000);
     
-    // Add key event listener
-    document.addEventListener('keydown', function(event) {
-        if (event.repeat) return; // Ignore key repeat
-        eel.key_pressed(event.code, true);
-    });
-    
-    document.addEventListener('keyup', function(event) {
-        eel.key_pressed(event.code, false);
-    });
+    // Add keyboard event listeners
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
 });
 
-// Function to handle playing generated tones from Python
-eel.expose(playTone);
-function playTone(key, audioPath) {
-    console.log(`Playing tone: ${audioPath} for key ${key}`);
+// Create a container for all audio elements
+function createAudioContainer() {
+    const container = document.createElement('div');
+    container.id = 'audioContainer';
+    container.style.display = 'none';
+    document.body.appendChild(container);
+}
+
+// Update keyboard mapping
+function updateKeyboardMapping(mapping) {
+    Object.assign(keyMapping, mapping);
+    console.log("Keyboard mapping updated:", keyMapping);
+}
+
+// Handle key press
+function handleKeyDown(event) {
+    if (event.repeat) return; // Prevent repeated triggers while holding key
     
-    // Stop any previously playing tone for this key
-    if (toneAudioSources[key]) {
-        stopTone(key);
-    }
-    
-    try {
-        // Create a new audio element for this tone
-        const audioElement = new Audio(audioPath);
-        audioElement.loop = true; // Loop the tone while key is pressed
-        
-        // Store for later cleanup
-        audioPlayers[key] = audioElement;
-        
-        // Play the tone
-        audioElement.play().catch(err => {
-            console.error("Error playing tone:", err);
-        });
-        
-        // If AudioSystem is initialized, connect to oscilloscope
-        if (typeof AudioSystem !== 'undefined' && AudioSystem.audioContext && AudioSystem.scopeNode) {
-            const source = AudioSystem.audioContext.createMediaElementSource(audioElement);
-            source.connect(AudioSystem.scopeNode);
-            toneAudioSources[key] = source;
-        }
-        
-        return true;
-    } catch (e) {
-        console.error("Error in playTone:", e);
-        return false;
+    const key = event.code;
+    if (keyMapping[key]) {
+        eel.key_pressed(key, true);
+        playSound(key, keyMapping[key]);
     }
 }
 
-// Function to stop playing a tone
-eel.expose(stopTone);
-function stopTone(key) {
-    console.log(`Stopping tone for key ${key}`);
-    
-    if (audioPlayers[key]) {
-        try {
-            // Stop the audio
-            audioPlayers[key].pause();
-            audioPlayers[key].currentTime = 0;
-            
-            // Disconnect the audio source if connected
-            if (toneAudioSources[key]) {
-                try {
-                    toneAudioSources[key].disconnect();
-                } catch (e) {
-                    console.warn("Could not disconnect audio source:", e);
-                }
-                delete toneAudioSources[key];
-            }
-            
-            delete audioPlayers[key];
-            return true;
-        } catch (e) {
-            console.error("Error stopping tone:", e);
-            return false;
-        }
+// Handle key release
+function handleKeyUp(event) {
+    const key = event.code;
+    if (keyMapping[key]) {
+        eel.key_pressed(key, false);
+        stopSound(key);
     }
-    return false;
+}
+
+// Play a sound for a specific key
+function playSound(key, audioFile) {
+    console.log(`Playing ${audioFile} for key ${key}`);
+    
+    // Create or get the audio element for this key
+    let audioElement = audioPlayers[key];
+    
+    // If no audio element exists for this key, create one
+    if (!audioElement) {
+        audioElement = new Audio();
+        audioElement.id = `audio-${key}`;
+        audioElement.loop = false;
+        audioPlayers[key] = audioElement;
+        
+        // Add to the DOM (hidden)
+        const container = document.getElementById('audioContainer');
+        container.appendChild(audioElement);
+    }
+    
+    // Set source and play
+    audioElement.src = audioFile;
+    audioElement.currentTime = 0;
+    
+    // Connect to oscilloscope
+    connectAudioToOscilloscope(audioElement, key);
+    
+    // Play the audio
+    const playPromise = audioElement.play();
+    if (playPromise) {
+        playPromise.catch(error => {
+            console.error(`Error playing audio for ${key}:`, error);
+        });
+    }
+}
+
+// Stop a sound for a specific key
+function stopSound(key) {
+    const audioElement = audioPlayers[key];
+    if (audioElement) {
+        audioElement.pause();
+        audioElement.currentTime = 0;
+    }
+}
+
+// Connect audio to oscilloscope
+function connectAudioToOscilloscope(audioElement, key) {
+    // Only connect if this is the first audio element
+    if (!AudioSystem.sourceMap) {
+        AudioSystem.sourceMap = {};
+    }
+    
+    // If we already have a connection for this key, disconnect it
+    if (AudioSystem.sourceMap[key]) {
+        AudioSystem.sourceMap[key].disconnect();
+    }
+    
+    try {
+        // Create a new audio source from the element
+        const source = AudioSystem.audioContext.createMediaElementSource(audioElement);
+        
+        // Connect to the scope node
+        source.connect(AudioSystem.scopeNode);
+        
+        // Store the source
+        AudioSystem.sourceMap[key] = source;
+        
+        console.log(`Connected audio for key ${key} to oscilloscope`);
+    } catch (e) {
+        console.error(`Error connecting audio to oscilloscope: ${e.message}`);
+    }
+}
+
+// Function to load an audio file
+eel.expose(loadAudioFile);
+function loadAudioFile(filepath) {
+    console.log(`Loading audio file: ${filepath}`);
+    return true;
 }
 
 // Update controls with values from Python
@@ -111,9 +158,9 @@ function updateControls(newControls) {
     }
     
     // Initialize the system if this is the first controls update
-    if (!window.isInitialized) {
+    if (!isInitialized) {
         initializeOscilloscope();
-        window.isInitialized = true;
+        isInitialized = true;
     }
 }
 
@@ -135,4 +182,23 @@ function initializeOscilloscope() {
     } catch (e) {
         console.error("Error initializing oscilloscope:", e);
     }
+}
+
+// Expose a function to assign a key mapping
+eel.expose(assignKeyMapping);
+function assignKeyMapping(key, audioFile) {
+    keyMapping[key] = audioFile;
+    console.log(`Assigned ${audioFile} to key ${key}`);
+    return true;
+}
+
+// Expose a function to remove a key mapping
+eel.expose(removeKeyMapping);
+function removeKeyMapping(key) {
+    if (keyMapping[key]) {
+        delete keyMapping[key];
+        console.log(`Removed mapping for key ${key}`);
+        return true;
+    }
+    return false;
 }
