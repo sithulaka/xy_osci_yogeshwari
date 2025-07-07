@@ -1,297 +1,408 @@
 <!DOCTYPE html>
 <head>
 <style>
-audio { width: 100%; display: none; }
-body { 
-    font: 12px Courier, Monospace; 
-    margin: 0; 
-    padding: 0; 
-    background-color: #000000; 
-    color: #00ff00; 
+audio { width: 100%; }
+body{font: 12px Courier, Monospace;}
+canvas{margin-right: 10px;}
+table {
+  border-spacing:0;
+  border-collapse: collapse;
 }
-canvas { 
-    display: block; 
-    margin: 20px auto; 
-    background-color: #000000; 
-    border: 2px solid #333333;
-    border-radius: 10px;
-    box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
-}
-.oscilloscope-container {
-    position: relative;
-    width: 100%;
-    max-width: 850px;
-    margin: 0 auto;
-    text-align: center;
-}
-.oscilloscope-label {
-    font-family: 'Courier New', monospace;
-    color: #00ff00;
-    margin-top: 5px;
-    font-size: 14px;
-    font-weight: bold;
-}
-/* Fix for the CRT appearance */
-#crtCanvas {
-    image-rendering: pixelated;
-    image-rendering: crisp-edges;
-}
+
 </style>
 </head>
 
-<body autocomplete="off">
-    <div class="oscilloscope-container">
-        <canvas id="crtCanvas" width="800" height="800"></canvas>
-        <audio id="audioElement" controls style="display:none;"></audio>
-    </div>
+<body bgcolor="black" text="black" autocomplete="off">
 
-    <script>
-    // Simple control object to store values coming from Python
-    var controls = {
-        swapXY: false,
-        sweepOn: false,
-        sweepMsDiv: 1,
-        sweepTriggerValue: 0,
-        signalGeneratorOn: false,
-        mainGain: 0.0,
-        exposureStops: 0.0,
-        audioVolume: 0.0,
-        hue: 125,
-        freezeImage: false,
-        disableFilter: false,
-        aValue: 1.0,
-        aExponent: 0.0,
-        bValue: 1.0,
-        bExponent: 0.0,
-        invertXY: false,
-        grid: true,
-        persistence: 0,
-        xExpression: "sin(2*PI*a*t)*cos(2*PI*b*t)",
-        yExpression: "cos(2*PI*a*t)*cos(2*PI*b*t)",
-    };
+<script>
+var controls=
+{
+	swapXY : false,
+    sweepOn : false,
+    sweepMsDiv : 1,
+    sweepTriggerValue : 0,
+	signalGeneratorOn : false,
+	mainGain : 0.0,
+	exposureStops : 0.0,
+	audioVolume : 1.0,
+	hue : 125,
+	freezeImage: false,
+	disableFilter: false,
+	aValue : 1.0,
+	aExponent : 0.0,
+	bValue : 1.0,
+	bExponent :0.0,
+	invertXY : false,
+	grid : true,
+	persistence : 0,
+	xExpression : "sin(2*PI*a*t)*cos(2*PI*b*t)",
+	yExpression : "cos(2*PI*a*t)*cos(2*PI*b*t)",
+}
 
-    // Function to update controls from Python
-    function updateControls(newControls) {
-        for (const [key, value] of Object.entries(newControls)) {
-            if (controls.hasOwnProperty(key)) {
-                controls[key] = value;
-            }
-        }
-        console.log("Controls updated from Python");
+Number.prototype.toFixedMinus = function(k)
+{
+	if (this<0) return this.toFixed(k);
+	//else return '\xa0'+this.toFixed(k);
+	else return '+'+this.toFixed(k);
+}
+
+var toggleVisible = function(string)
+{
+	var element = document.getElementById(string);
+	console.log(element.style.display);
+	if (element.style.display == "none") element.style.display="block";
+	else element.style.display = "none";
+}
+
+
+
+</script>
+
+
+<table align="center">
+<tr>
+
+<td valign="top">
+<canvas id="crtCanvas" width="1080" height="1080"></canvas>
+</td>
+</tr>
+</table>
+
+<audio id="audioElement" controls style="display:none;"></audio>
+
+<div id="keyboardStatus" style="color: silver;">
+    <p>Loading keyboard controls...</p>
+</div>
+
+<script>
+var file;
+audioFile.onchange = function()
+{
+	if (file) URL.revokeObjectURL(file)
+    var files = this.files;
+    file = URL.createObjectURL(files[0]);
+    audioElement.src = file;
+    audioElement.play();
+};
+</script>
+
+<script>
+
+var Controls = {
+    generateUrl : function()
+    {
+        var locationString = location.toString();
+        var site = locationString.split('#')[0];
+        var text = this.getControlsArray().toString();
+        var hm = encodeURI(text);
+        urlText.value = site+'#'+hm;
+        urlText.select();
+    },
+
+    getControlsArray : function()
+    {
+      var a = [];
+      return a;
+    },
+
+    setupControls : function()
+    {
+        UI.compile();
+    },
+
+    encodeString : function(s)
+    {
+        s=s.replace(/ /g,"");
+        s=s.replace(/,/g,";");
+        return s;
+    },
+
+    decodeString : function(s)
+    {  
+        s=s.replace(/;/,",");
+        return s;
+    },
+
+    setupSlider : function(slider, s)
+    {
+        slider.value = parseFloat(s);
+        slider.oninput();
+    },
+
+    setupCheckbox : function(checkbox, s)
+    {
+        checkbox.checked = parseInt(s);
+        checkbox.onchange();
+    },
+
+    setupString : function(inp, s)
+    {
+        inp.value = this.decodeString(s);
+    },
+
+    restoreDefaults : function()
+    {
+        var locationString = location.toString();
+        var site = locationString.split('#')[0];
+        location = site;
     }
-    </script>
+}
 
-    <!-- Load Eel JS library -->
-    <script type="text/javascript" src="/eel.js"></script>
+</script>
 
-    <!-- Include shaders -->
-    <script id="vertex" type="x-shader">
-        attribute vec2 vertexPosition;
-        void main() {
-            gl_Position = vec4(vertexPosition, 0.0, 1.0);
-        }
-    </script>
+<div id="extraNotes" style="display:none">
+</div>
 
-    <script id="fragment" type="x-shader">
-        precision highp float;
-        uniform vec4 colour;
-        void main() {
-            gl_FragColor = colour;
-        }
-    </script>
 
-    <script id="gaussianVertex" type="x-shader">
-        #define EPS 1E-6
-        uniform float uInvert;
-        uniform float uSize;
-        uniform float uNEdges;
-        uniform float uFadeAmount;
-        uniform float uIntensity;
-        uniform float uGain;
-        attribute vec2 aStart, aEnd;
-        attribute float aIdx;
-        varying vec4 uvl;
-        varying vec2 vTexCoord;
-        varying float vLen;
-        varying float vSize;
-        void main () {
-            float tang;
-            vec2 current;
-            float idx = mod(aIdx,4.0);
-            vec2 dir = (aEnd-aStart)*uGain;
-            uvl.z = length(dir);
+<!-- XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX -->
 
-            if (uvl.z > EPS) {
-                dir = dir / uvl.z;
-                vSize = 0.006/pow(uvl.z,0.08);
-            } else {
-                dir = vec2(1.0, 0.0);
-                vSize = 0.006/pow(EPS,0.08);
-            }
 
-            vSize = uSize;
-            vec2 norm = vec2(-dir.y, dir.x);
+</td>
+</tr>
+</table>
 
-            if (idx >= 2.0) {
-                current = aEnd*uGain;
-                tang = 1.0;
-                uvl.x = -vSize;
-            } else {
-                current = aStart*uGain;
-                tang = -1.0;
-                uvl.x = uvl.z + vSize;
-            }
-            float side = (mod(idx, 2.0)-0.5)*2.0;
-            uvl.y = side * vSize;
 
-            uvl.w = uIntensity*mix(1.0-uFadeAmount, 1.0, floor(aIdx / 4.0 + 0.5)/uNEdges);
+<script id="vertex" type="x-shader">
+	attribute vec2 vertexPosition;
+	void main()
+	{
+		gl_Position = vec4(vertexPosition, 0.0, 1.0);
+	}
+</script>
 
-            vec4 pos = vec4((current+(tang*dir+norm*side)*vSize)*uInvert,0.0,1.0);
-            gl_Position = pos;
-            vTexCoord = 0.5*pos.xy+0.5;
-        }
-    </script>
+<script id="fragment" type="x-shader">
+	precision highp float;
+	uniform vec4 colour;
+	void main()
+	{
+		gl_FragColor = colour;
+	}
+</script>
 
-    <script id="gaussianFragment" type="x-shader">
-        #define EPS 1E-6
-        #define TAU 6.283185307179586
-        #define TAUR 2.5066282746310002
-        #define SQRT2 1.4142135623730951
-        precision highp float;
-        uniform float uSize;
-        uniform float uIntensity;
-        uniform sampler2D uScreen;
-        varying float vSize;
-        varying vec4 uvl;
-        varying vec2 vTexCoord;
+<!-- The Gaussian line-drawing code, the next two shaders, is adapted
+	 from woscope by e1ml : https://github.com/m1el/woscope -->
 
-        float gaussian(float x, float sigma) {
-            return exp(-(x * x) / (2.0 * sigma * sigma)) / (TAUR * sigma);
-        }
+<script id="gaussianVertex" type="x-shader">
+	#define EPS 1E-6
+	uniform float uInvert;
+	uniform float uSize;
+	uniform float uNEdges;
+	uniform float uFadeAmount;
+	uniform float uIntensity;
+	uniform float uGain;
+	attribute vec2 aStart, aEnd;
+	attribute float aIdx;
+	varying vec4 uvl;
+	varying vec2 vTexCoord;
+	varying float vLen;
+	varying float vSize;
+	void main () {
+		float tang;
+		vec2 current;
+		// All points in quad contain the same data:
+		// segment start point and segment end point.
+		// We determine point position using its index.
+		float idx = mod(aIdx,4.0);
 
-        float erf(float x) {
-            float s = sign(x), a = abs(x);
-            x = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
-            x *= x;
-            return s - s / (x * x);
-        }
+		// `dir` vector is storing the normalized difference
+		// between end and start
+		vec2 dir = (aEnd-aStart)*uGain;
+		uvl.z = length(dir);
 
-        void main (void) {
-            float len = uvl.z;
-            vec2 xy = uvl.xy;
-            float brightness;
+		if (uvl.z > EPS)
+		{
+			dir = dir / uvl.z;
+			vSize = 0.006/pow(uvl.z,0.08);
+		}
+		else
+		{
+		// If the segment is too short, just draw a square
+			dir = vec2(1.0, 0.0);
+			vSize = 0.006/pow(EPS,0.08);
+		}
 
-            float sigma = vSize/5.0;
-            if (len < EPS) {
-                brightness = gaussian(length(xy), sigma);
-            } else {
-                brightness = erf(xy.x/SQRT2/sigma) - erf((xy.x-len)/SQRT2/sigma);
-                brightness *= exp(-xy.y*xy.y/(2.0*sigma*sigma))/2.0/len;
-            }
+		vSize = uSize;
+		vec2 norm = vec2(-dir.y, dir.x);
 
-            brightness *= uvl.w;
-            gl_FragColor = 2.0 * texture2D(uScreen, vTexCoord) * brightness;
-            gl_FragColor.a = 1.0;
-        }
-    </script>
+		if (idx >= 2.0) {
+			current = aEnd*uGain;
+			tang = 1.0;
+			uvl.x = -vSize;
+		} else {
+			current = aStart*uGain;
+			tang = -1.0;
+			uvl.x = uvl.z + vSize;
+		}
+		// `side` corresponds to shift to the "right" or "left"
+		float side = (mod(idx, 2.0)-0.5)*2.0;
+		uvl.y = side * vSize;
 
-    <script id="texturedVertex" type="x-shader">
-        precision highp float;
-        attribute vec2 aPos;
-        varying vec2 vTexCoord;
-        void main (void) {
-            gl_Position = vec4(aPos, 0.0, 1.0);
-            vTexCoord = (0.5*aPos+0.5);
-        }
-    </script>
+		uvl.w = uIntensity*mix(1.0-uFadeAmount, 1.0, floor(aIdx / 4.0 + 0.5)/uNEdges);
 
-    <script id="texturedVertexWithResize" type="x-shader">
-        precision highp float;
-        attribute vec2 aPos;
-        varying vec2 vTexCoord;
-        uniform float uResizeForCanvas;
-        void main (void) {
-            gl_Position = vec4(aPos, 0.0, 1.0);
-            vTexCoord = (0.5*aPos+0.5)*uResizeForCanvas;
-        }
-    </script>
+		vec4 pos = vec4((current+(tang*dir+norm*side)*vSize)*uInvert,0.0,1.0);
+		gl_Position = pos;
+        vTexCoord = 0.5*pos.xy+0.5;
+        //float seed = floor(aIdx/4.0);
+        //seed = mod(sin(seed*seed), 7.0);
+        //if (mod(seed/2.0, 1.0)<0.5) gl_Position = vec4(10.0);
+	}
+</script>
 
-    <script id="texturedFragment" type="x-shader">
-        precision highp float;
-        uniform sampler2D uTexture0;
-        varying vec2 vTexCoord;
-        void main (void) {
-            gl_FragColor = texture2D(uTexture0, vTexCoord);
-            gl_FragColor.a= 1.0;
-        }
-    </script>
+<script id="gaussianFragment" type="x-shader">
+	#define EPS 1E-6
+	#define TAU 6.283185307179586
+	#define TAUR 2.5066282746310002
+	#define SQRT2 1.4142135623730951
+	precision highp float;
+	uniform float uSize;
+	uniform float uIntensity;
+	uniform sampler2D uScreen;
+	varying float vSize;
+	varying vec4 uvl;
+	varying vec2 vTexCoord;
 
-    <script id="blurFragment" type="x-shader">
-        precision highp float;
-        uniform sampler2D uTexture0;
-        uniform vec2 uOffset;
-        varying vec2 vTexCoord;
-        void main (void) {
-            vec4 sum = vec4(0.0);
-            sum += texture2D(uTexture0, vTexCoord - uOffset*8.0) * 0.000078;
-            sum += texture2D(uTexture0, vTexCoord - uOffset*7.0) * 0.000489;
-            sum += texture2D(uTexture0, vTexCoord - uOffset*6.0) * 0.002403;
-            sum += texture2D(uTexture0, vTexCoord - uOffset*5.0) * 0.009245;
-            sum += texture2D(uTexture0, vTexCoord - uOffset*4.0) * 0.027835;
-            sum += texture2D(uTexture0, vTexCoord - uOffset*3.0) * 0.065592;
-            sum += texture2D(uTexture0, vTexCoord - uOffset*2.0) * 0.12098;
-            sum += texture2D(uTexture0, vTexCoord - uOffset*1.0) * 0.17467;
-            sum += texture2D(uTexture0, vTexCoord + uOffset*0.0) * 0.19742;
-            sum += texture2D(uTexture0, vTexCoord + uOffset*1.0) * 0.17467;
-            sum += texture2D(uTexture0, vTexCoord + uOffset*2.0) * 0.12098;
-            sum += texture2D(uTexture0, vTexCoord + uOffset*3.0) * 0.065592;
-            sum += texture2D(uTexture0, vTexCoord + uOffset*4.0) * 0.027835;
-            sum += texture2D(uTexture0, vTexCoord + uOffset*5.0) * 0.009245;
-            sum += texture2D(uTexture0, vTexCoord + uOffset*6.0) * 0.002403;
-            sum += texture2D(uTexture0, vTexCoord + uOffset*7.0) * 0.000489;
-            sum += texture2D(uTexture0, vTexCoord + uOffset*8.0) * 0.000078;
-            gl_FragColor = sum;
-        }
-    </script>
+	// A standard gaussian function, used for weighting samples
+	float gaussian(float x, float sigma)
+	{
+	  return exp(-(x * x) / (2.0 * sigma * sigma)) / (TAUR * sigma);
+	}
 
-    <script id="outputVertex" type="x-shader">
-        precision highp float;
-        attribute vec2 aPos;
-        varying vec2 vTexCoord;
-        varying vec2 vTexCoordCanvas;
-        uniform float uResizeForCanvas;
-        void main (void) {
-            gl_Position = vec4(aPos, 0.0, 1.0);
-            vTexCoord = (0.5*aPos+0.5);
-            vTexCoordCanvas = vTexCoord*uResizeForCanvas;
-        }
-    </script>
+	// This approximates the error function, needed for the gaussian integral
+	float erf(float x)
+	{
+	  float s = sign(x), a = abs(x);
+	  x = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
+	  x *= x;
+	  return s - s / (x * x);
+	}
 
-    <script id="outputFragment" type="x-shader">
-        precision highp float;
-        uniform sampler2D uTexture0; //line
-        uniform sampler2D uTexture1; //tight glow
-        uniform sampler2D uTexture2; //big glow
-        uniform sampler2D uTexture3; //screen
-        uniform float uExposure;
-        uniform vec3 uColour;
-        varying vec2 vTexCoord;
-        varying vec2 vTexCoordCanvas;
-        void main (void) {
-            vec4 line = texture2D(uTexture0, vTexCoordCanvas);
-            vec4 screen = texture2D(uTexture3, vTexCoord);
-            vec4 tightGlow = texture2D(uTexture1, vTexCoord);
-            vec4 scatter = texture2D(uTexture2, vTexCoord)+0.35;
-            float light = line.r + 1.5*screen.g*screen.g*tightGlow.r;
-            light += 0.4*scatter.g * (2.0+1.0*screen.g + 0.5*screen.r);
-            float tlight = 1.0-pow(2.0, -uExposure*light);
-            float tlight2 = tlight*tlight*tlight;
-            gl_FragColor.rgb = mix(uColour, vec3(1.0), 0.3+tlight2*tlight2*0.5)*tlight;
-            gl_FragColor.a= 1.0;
-        }
-    </script>
+	void main (void)
+	{
+		float len = uvl.z;
+		vec2 xy = uvl.xy;
+		float brightness;
 
-    <script src="controller.js"></script>
-    <script src="oscilloscope.js"></script>
-</body>
-</html>
+		float sigma = vSize/5.0;
+		if (len < EPS)
+		{
+		// If the beam segment is too short, just calculate intensity at the position.
+			brightness = gaussian(length(xy), sigma);
+		}
+		else
+		{
+		// Otherwise, use analytical integral for accumulated intensity.
+			brightness = erf(xy.x/SQRT2/sigma) - erf((xy.x-len)/SQRT2/sigma);
+			brightness *= exp(-xy.y*xy.y/(2.0*sigma*sigma))/2.0/len;
+		}
+
+		brightness *= uvl.w;
+		gl_FragColor = 2.0 * texture2D(uScreen, vTexCoord) * brightness;
+		gl_FragColor.a = 1.0;
+	}
+</script>
+
+<script id="texturedVertex" type="x-shader">
+    precision highp float;
+    attribute vec2 aPos;
+    varying vec2 vTexCoord;
+    void main (void)
+    {
+        gl_Position = vec4(aPos, 0.0, 1.0);
+        vTexCoord = (0.5*aPos+0.5);
+    }
+</script>
+
+<script id="texturedVertexWithResize" type="x-shader">
+    precision highp float;
+    attribute vec2 aPos;
+    varying vec2 vTexCoord;
+    uniform float uResizeForCanvas;
+    void main (void)
+    {
+        gl_Position = vec4(aPos, 0.0, 1.0);
+        vTexCoord = (0.5*aPos+0.5)*uResizeForCanvas;
+    }
+</script>
+
+<script id="texturedFragment" type="x-shader">
+    precision highp float;
+    uniform sampler2D uTexture0;
+    varying vec2 vTexCoord;
+    void main (void)
+    {
+        gl_FragColor = texture2D(uTexture0, vTexCoord);
+        gl_FragColor.a= 1.0;
+    }
+</script>
+
+<script id="blurFragment" type="x-shader">
+    precision highp float;
+    uniform sampler2D uTexture0;
+    uniform vec2 uOffset;
+    varying vec2 vTexCoord;
+    void main (void)
+    {
+    	vec4 sum = vec4(0.0);
+        sum += texture2D(uTexture0, vTexCoord - uOffset*8.0) * 0.000078;
+        sum += texture2D(uTexture0, vTexCoord - uOffset*7.0) * 0.000489;
+        sum += texture2D(uTexture0, vTexCoord - uOffset*6.0) * 0.002403;
+        sum += texture2D(uTexture0, vTexCoord - uOffset*5.0) * 0.009245;
+        sum += texture2D(uTexture0, vTexCoord - uOffset*4.0) * 0.027835;
+        sum += texture2D(uTexture0, vTexCoord - uOffset*3.0) * 0.065592;
+        sum += texture2D(uTexture0, vTexCoord - uOffset*2.0) * 0.12098;
+        sum += texture2D(uTexture0, vTexCoord - uOffset*1.0) * 0.17467;
+        sum += texture2D(uTexture0, vTexCoord + uOffset*0.0) * 0.19742;
+        sum += texture2D(uTexture0, vTexCoord + uOffset*1.0) * 0.17467;
+        sum += texture2D(uTexture0, vTexCoord + uOffset*2.0) * 0.12098;
+        sum += texture2D(uTexture0, vTexCoord + uOffset*3.0) * 0.065592;
+        sum += texture2D(uTexture0, vTexCoord + uOffset*4.0) * 0.027835;
+        sum += texture2D(uTexture0, vTexCoord + uOffset*5.0) * 0.009245;
+        sum += texture2D(uTexture0, vTexCoord + uOffset*6.0) * 0.002403;
+        sum += texture2D(uTexture0, vTexCoord + uOffset*7.0) * 0.000489;
+        sum += texture2D(uTexture0, vTexCoord + uOffset*8.0) * 0.000078;
+        gl_FragColor = sum;
+    }
+</script>
+
+<script id="outputVertex" type="x-shader">
+    precision highp float;
+    attribute vec2 aPos;
+    varying vec2 vTexCoord;
+    varying vec2 vTexCoordCanvas;
+    uniform float uResizeForCanvas;
+    void main (void)
+    {
+        gl_Position = vec4(aPos, 0.0, 1.0);
+        vTexCoord = (0.5*aPos+0.5);
+        vTexCoordCanvas = vTexCoord*uResizeForCanvas;
+    }
+</script>
+
+<script id="outputFragment" type="x-shader">
+    precision highp float;
+    uniform sampler2D uTexture0; //line
+    uniform sampler2D uTexture1; //tight glow
+    uniform sampler2D uTexture2; //big glow
+    uniform sampler2D uTexture3; //screen
+    uniform float uExposure;
+    uniform vec3 uColour;
+    varying vec2 vTexCoord;
+    varying vec2 vTexCoordCanvas;
+    void main (void)
+    {
+    	vec4 line = texture2D(uTexture0, vTexCoordCanvas);
+    	// r components have grid; g components do not.
+    	vec4 screen = texture2D(uTexture3, vTexCoord);
+    	vec4 tightGlow = texture2D(uTexture1, vTexCoord);
+    	vec4 scatter = texture2D(uTexture2, vTexCoord)+0.35;
+    	float light = line.r + 1.5*screen.g*screen.g*tightGlow.r;
+    	light += 0.4*scatter.g * (2.0+1.0*screen.g + 0.5*screen.r);
+    	float tlight = 1.0-pow(2.0, -uExposure*light);
+    	float tlight2 = tlight*tlight*tlight;
+    	gl_FragColor.rgb = mix(uColour, vec3(1.0), 0.3+tlight2*tlight2*0.5)*tlight;
+        gl_FragColor.a= 1.0;
+    }
+</script>
+
+<script src="oscilloscope.js"></script>
+<script src="keyboard-mapper.js"></script>

@@ -1,5 +1,0 @@
-numpy
-scipy
-svgpathtools
-eel==0.14.0
-# keyboard==0.13.5  # Removed - no longer needed
