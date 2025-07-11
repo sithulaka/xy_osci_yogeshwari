@@ -112,7 +112,6 @@ class KeyboardAudioManager {
         const keyboardStatus = document.getElementById('keyboardStatus');
         if (keyboardStatus) {
             keyboardStatus.innerHTML = `
-                <p>Press keys to play audio samples</p>
                 <div id="activeKeys" style="font-family: monospace; color: #00ff00; margin: 5px 0;"></div>
                 <div id="keyMapDisplay" style="font-size: 10px; color: #666; margin-top: 10px;"></div>
             `;
@@ -127,6 +126,9 @@ class KeyboardAudioManager {
         
         const key = event.key.toLowerCase();
         if (this.audioBuffers[key] && !this.activeNotes[key]) {
+            // Stop all currently playing notes before starting a new one
+            this.stopAllNotes();
+            
             this.pressedKeys.add(event.code);
             this.startNote(key);
             this.startTone(key);
@@ -307,8 +309,8 @@ class KeyboardAudioManager {
             const allKeys = [...new Set([...keys, ...toneKeys])];
             
             if (allKeys.length > 0) {
-                activeKeysDiv.textContent = 'Active keys: ' + allKeys.join(', ').toUpperCase();
-                activeKeysDiv.style.display = 'block';
+                activeKeysDiv.textContent = '';
+                activeKeysDiv.style.display = 'none';
             } else {
                 activeKeysDiv.style.display = 'none';
             }

@@ -2,11 +2,23 @@
 <head>
 <style>
 audio { width: 100%; }
-body{font: 12px Courier, Monospace;}
-canvas{margin-right: 10px;}
-table {
-  border-spacing:0;
-  border-collapse: collapse;
+body{
+  font: 12px Courier, Monospace;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: black;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+canvas{
+  display: block;
+  margin: 0;
+  padding: 0;
+  background-color: #000;
 }
 
 </style>
@@ -15,6 +27,27 @@ table {
 <body bgcolor="black" text="black" autocomplete="off">
 
 <script>
+// Canvas resize handler
+function resizeCanvas() {
+    const canvas = document.getElementById('crtCanvas');
+    // Calculate the size to maintain square aspect ratio
+    const size = Math.min(window.innerWidth, window.innerHeight);
+    canvas.width = size;
+    canvas.height = size;
+    
+    // Notify oscilloscope that canvas has been resized if needed
+    if (typeof handleCanvasResize === 'function') {
+        handleCanvasResize();
+    }
+}
+
+// Set up resize listener
+window.addEventListener('resize', resizeCanvas);
+window.addEventListener('load', resizeCanvas);
+
+// Call resize immediately
+setTimeout(resizeCanvas, 0);
+
 var controls=
 {
 	swapXY : false,
@@ -59,31 +92,24 @@ var toggleVisible = function(string)
 </script>
 
 
-<table align="center">
-<tr>
-
-<td valign="top">
-<canvas id="crtCanvas" width="1080" height="1080"></canvas>
-</td>
-</tr>
-</table>
+<canvas id="crtCanvas"></canvas>
 
 <audio id="audioElement" controls style="display:none;"></audio>
 
-<div id="keyboardStatus" style="color: silver;">
-    <p>Loading keyboard controls...</p>
+<div id="keyboardStatus" style="color: silver; display: none;">
 </div>
 
 <script>
-var file;
-audioFile.onchange = function()
-{
-	if (file) URL.revokeObjectURL(file)
-    var files = this.files;
-    file = URL.createObjectURL(files[0]);
-    audioElement.src = file;
-    audioElement.play();
-};
+// Audio file handling - commented out as audioFile element doesn't exist
+// var file;
+// audioFile.onchange = function()
+// {
+// 	if (file) URL.revokeObjectURL(file)
+//     var files = this.files;
+//     file = URL.createObjectURL(files[0]);
+//     audioElement.src = file;
+//     audioElement.play();
+// };
 </script>
 
 <script>

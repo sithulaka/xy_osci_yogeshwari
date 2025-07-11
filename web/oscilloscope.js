@@ -34,6 +34,14 @@ var AudioSystem =
         this.scopeNode.onaudioprocess = doScriptProcessor;
         this.source.connect(this.scopeNode);
     	this.generator.connect(this.scopeNode);
+    	
+    	// Create a silent oscillator to keep the audio context active
+    	this.silentOscillator = this.audioContext.createOscillator();
+    	this.silentGain = this.audioContext.createGain();
+    	this.silentGain.gain.value = 0; // Silent
+    	this.silentOscillator.connect(this.silentGain);
+    	this.silentGain.connect(this.scopeNode);
+    	this.silentOscillator.start();
 
         this.scopeNode.connect(this.audioVolumeNode);
         this.audioVolumeNode.connect(this.audioContext.destination);
@@ -588,13 +596,33 @@ var Render =
 		gl.bindTexture(gl.TEXTURE_2D, this.screenTexture);
 		gl.uniform1i(program.uScreen, 0);
 
+		// Check if we're showing baseline noise
+		var isShowingNoise = false;
+		if (typeof keyboardAudioManager !== 'undefined' && keyboardAudioManager) {
+			var status = keyboardAudioManager.getStatus();
+			isShowingNoise = status.activeSamples === 0;
+		}
+		
 		gl.uniform1f(program.uSize, 0.015);
-		gl.uniform1f(program.uGain, Math.pow(2.0,controls.mainGain)*450/512);
+		
+		// Adjust gain for baseline noise visibility
+		if (isShowingNoise) {
+			gl.uniform1f(program.uGain, 1.0); // Fixed gain for consistent baseline
+		} else {
+			gl.uniform1f(program.uGain, Math.pow(2.0,controls.mainGain)*450/512);
+		}
+		
 		if (controls.invertXY) gl.uniform1f(program.uInvert, -1.0);
 		else gl.uniform1f(program.uInvert, 1.0);
-		if (controls.disableFilter) gl.uniform1f(program.uIntensity, 0.005*(Filter.steps+1.5));
-		// +1.5 needed above for some reason for the brightness to match
-		else gl.uniform1f(program.uIntensity, 0.005);
+		
+		// Adjust intensity for baseline noise
+		if (isShowingNoise) {
+			gl.uniform1f(program.uIntensity, 0.003); // Dimmer for realistic baseline
+		} else if (controls.disableFilter) {
+			gl.uniform1f(program.uIntensity, 0.005*(Filter.steps+1.5));
+		} else {
+			gl.uniform1f(program.uIntensity, 0.005);
+		}
 		gl.uniform1f(program.uFadeAmount, this.fadeAmount);
 		gl.uniform1f(program.uNEdges, this.nEdges);
 
@@ -864,10 +892,138 @@ function doScriptProcessor(event)
 	var yOut = event.outputBuffer.getChannelData(1);
 
 	var length = xSamplesRaw.length;
+	
+	// Check if any audio is playing
+	var hasAudioInput = false;
+	for (var i=0; i<length; i++) {
+		if (Math.abs(xSamplesRaw[i]) > 0.0001 || Math.abs(ySamplesRaw[i]) > 0.0001) {
+			hasAudioInput = true;
+			break;
+		}
+	}
+	
+	// Check if keyboard audio is active
+	var isKeyboardActive = false;
+	if (typeof keyboardAudioManager !== 'undefined' && keyboardAudioManager) {
+		var status = keyboardAudioManager.getStatus();
+		isKeyboardActive = status.activeSamples > 0;
+	}
+	
+	// Variables for noise generation
+	var currentTime = Date.now() / 1000.0;
+	var disruption = Math.sin(currentTime * 0.7) * Math.sin(currentTime * 1.3);
+	var shouldDisrupt = Math.random() < 0.02; // 2% chance of disruption
+	var burstNoise = Math.random() < 0.005; // 0.5% chance of noise burst
+	
+	// Analog noise patterns
+	var analogPattern = Math.floor(currentTime * 0.1) % 10; // Changes every 10 seconds
+	var showAnalogNoise = Math.random() < 0.1; // 10% chance of analog patterns
+	var interferencePhase = currentTime * 15.7; // Non-harmonic frequency for beating
+	
 	for (var i=0; i<length; i++)
 	{
-		xSamples[i] = xSamplesRaw[i];// + (Math.random()-0.5)*controls.noise/2000;
-		ySamples[i] = ySamplesRaw[i];// + (Math.random()-0.5)*controls.noise/2000;
+		if (!hasAudioInput && !isKeyboardActive) {
+			// Generate horizontal line with realistic oscilloscope noise
+			// X sweeps from left to right with occasional disruptions
+			var xPosition = -1.0 + (2.0 * i / length);
+			
+			// Add occasional horizontal disruptions
+			if (shouldDisrupt && i > length * 0.3 && i < length * 0.4) {
+				xPosition += (Math.random() - 0.5) * 0.1;
+			}
+			
+			xSamples[i] = xPosition;
+			
+			// Y baseline noise with varying characteristics
+			var baseNoise = 0.008;
+			var noiseMultiplier = 1.0;
+			
+			// Occasional noise bursts
+			if (burstNoise && i > length * 0.5 && i < length * 0.6) {
+				noiseMultiplier = 5.0;
+			}
+			
+			// Varying noise intensity over time
+			noiseMultiplier *= (1.0 + disruption * 0.5);
+			
+			// Generate the noise
+			ySamples[i] = (Math.random() - 0.5) * baseNoise * noiseMultiplier;
+			
+			// Add multiple frequency components for realism
+			var time = currentTime + i * 0.00002;
+			
+			// 60Hz hum
+			ySamples[i] += Math.sin(time * 60 * 2 * Math.PI) * 0.002;
+			
+			// Low frequency drift
+			ySamples[i] += Math.sin(time * 0.5) * 0.003;
+			
+			// High frequency noise
+			ySamples[i] += (Math.random() - 0.5) * 0.001;
+			
+			// Analog noise patterns
+			if (showAnalogNoise) {
+				switch(analogPattern) {
+					case 0: // Oscillating interference pattern
+						ySamples[i] += Math.sin(time * 127) * Math.cos(time * 73) * 0.02;
+						xSamples[i] += Math.sin(time * 89) * 0.01;
+						break;
+					case 1: // Sawtooth drift
+						var sawPhase = (time * 2.3) % 1.0;
+						ySamples[i] += (sawPhase - 0.5) * 0.03;
+						break;
+					case 2: // Radio frequency interference
+						ySamples[i] += Math.sin(interferencePhase + i * 0.1) * 
+						              Math.sin(time * 1000) * 0.015;
+						break;
+					case 3: // Power supply ripple
+						ySamples[i] += Math.sin(time * 120 * Math.PI) * 0.01 +
+						              Math.sin(time * 240 * Math.PI) * 0.005;
+						break;
+					case 4: // Analog crosstalk simulation
+						var crosstalk = Math.sin(time * 33) * Math.sin(time * 77);
+						ySamples[i] += crosstalk * 0.025;
+						xSamples[i] += crosstalk * 0.005;
+						break;
+					case 5: // Thermal noise burst
+						if (i % 10 < 3) {
+							ySamples[i] += (Math.random() - 0.5) * 0.04;
+						}
+						break;
+					case 6: // Oscillation decay pattern
+						var decay = Math.exp(-((i - length/2) * (i - length/2)) / (length * length * 0.1));
+						ySamples[i] += Math.sin(time * 200 + i * 0.5) * decay * 0.03;
+						break;
+					case 7: // Ground loop hum with harmonics
+						for (var h = 1; h <= 5; h++) {
+							ySamples[i] += Math.sin(time * 60 * h * 2 * Math.PI) * 0.003 / h;
+						}
+						break;
+					case 8: // Analog switch bounce
+						if (Math.random() < 0.01) {
+							ySamples[i] += (Math.random() - 0.5) * 0.1 * Math.exp(-i * 0.01);
+						}
+						break;
+					case 9: // Mixed frequency beating
+						ySamples[i] += (Math.sin(time * 97) + Math.sin(time * 103)) * 0.01;
+						break;
+				}
+			}
+			
+			// Occasional spikes
+			if (Math.random() < 0.0005) {
+				ySamples[i] += (Math.random() - 0.5) * 0.05;
+			}
+			
+			// Random discontinuities
+			if (Math.random() < 0.001) {
+				xSamples[i] = Math.random() * 2.0 - 1.0;
+				ySamples[i] = Math.random() * 0.1 - 0.05;
+			}
+		} else {
+			xSamples[i] = xSamplesRaw[i];
+			ySamples[i] = ySamplesRaw[i];
+		}
 	}
 
     if (controls.sweepOn)
