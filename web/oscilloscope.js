@@ -1,8 +1,7 @@
+
 var AudioSystem =
 {
 	microphoneActive : false,
-	audioVolumeNode: null,
-    sourceMap: {}, // Map keys to audio sources
 
     init : function (bufferSize)
     {
@@ -18,37 +17,34 @@ var AudioSystem =
 
     	if (!(navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia))
     	{
-    		console.warn("Microphone input unavailable in this browser");
+    		// Microphone unavailable in this browser
     	}
     },
 
     startSound : function()
     {
-        // Set up audio context and nodes
-        if (this.audioContext.state === 'suspended') {
-            this.audioContext.resume().catch(e => console.warn("Failed to resume AudioContext:", e));
-        }
-        
-        // Create a gain node for volume control
-        this.audioVolumeNode = this.audioContext.createGain();
-        this.audioVolumeNode.gain.value = controls.audioVolume;
-        
-        // Create script processor for signal generation
-        this.generator = this.audioContext.createScriptProcessor(this.bufferSize, 0, 2);
-        this.generator.onaudioprocess = SignalGenerator.generate;
-        
-        // Create the oscilloscope processor
+    	var audioElement = document.getElementById("audioElement");
+    	this.source = this.audioContext.createMediaElementSource(audioElement);
+		this.audioVolumeNode = this.audioContext.createGain();
+
+		this.generator = this.audioContext.createScriptProcessor(this.bufferSize, 0, 2);
+		this.generator.onaudioprocess = SignalGenerator.generate;
+
         this.scopeNode = this.audioContext.createScriptProcessor(this.bufferSize, 2, 2);
         this.scopeNode.onaudioprocess = doScriptProcessor;
-        
-        // Connect the generator to the scope
-        this.generator.connect(this.scopeNode);
-        
-        // Connect the scope to the volume control and output
+        this.source.connect(this.scopeNode);
+    	this.generator.connect(this.scopeNode);
+    	
+    	// Create a silent oscillator to keep the audio context active
+    	this.silentOscillator = this.audioContext.createOscillator();
+    	this.silentGain = this.audioContext.createGain();
+    	this.silentGain.gain.value = 0; // Silent
+    	this.silentOscillator.connect(this.silentGain);
+    	this.silentGain.connect(this.scopeNode);
+    	this.silentOscillator.start();
+
         this.scopeNode.connect(this.audioVolumeNode);
         this.audioVolumeNode.connect(this.audioContext.destination);
-        
-        console.log("Audio system initialized");
     },
 
     tryToGetMicrophone : function()
@@ -56,8 +52,6 @@ var AudioSystem =
         if (this.microphoneActive)
         {
             AudioSystem.microphone.connect(AudioSystem.scopeNode);
-						audioVolume.value = 0.0;
-				    audioVolume.oninput();
             return;
         }
 
@@ -68,11 +62,7 @@ var AudioSystem =
                          navigator.mozGetUserMedia;
         if (navigator.getUserMedia)
         {
-			navigator.getUserMedia(constraints, onStream, function(){micCheckbox.checked = false;});
-       	}
-       	else
-       	{
-       		micCheckbox.checked = false;
+			navigator.getUserMedia(constraints, onStream, function(){});
        	}
     },
 
@@ -89,9 +79,6 @@ onStream = function(stream)
     AudioSystem.microphoneActive = true;
 	  AudioSystem.microphone = AudioSystem.audioContext.createMediaStreamSource(stream);
 	  AudioSystem.microphone.connect(AudioSystem.scopeNode);
-
-    audioVolume.value = 0.0;
-    audioVolume.oninput();
 };
 
 var SignalGenerator =
@@ -267,18 +254,29 @@ var Filter =
 
 var UI =
 {
-	sidebarWidth : 0,  // Changed from 360 to 0 since there's no sidebar now
+	sidebarWidth : 360,
 
 	init : function()
 	{
 		var kHzText = (AudioSystem.sampleRate/1000).toFixed(1)+"kHz";
-		console.log("Sample rate: " + kHzText);
+		var sampleRateElement = document.getElementById("samplerate");
+		if (sampleRateElement) {
+			sampleRateElement.innerHTML = kHzText;
+		}
+		this.xInput = document.getElementById("xInput");
+		this.yInput = document.getElementById("yInput");
+		if (this.xInput && this.yInput) {
+			this.xInput.value = controls.xExpression;
+			this.yInput.value = controls.yExpression;
+		}
 	},
 
-	compile : function()
+	compile : function() //doesn't compile anything anymore
 	{
-		// No need to read from UI elements anymore
-		// Controls are updated from Python
+		if (this.xInput && this.yInput) {
+			controls.xExpression = this.xInput.value;
+			controls.yExpression = this.yInput.value;
+		}
 	}
 }
 
@@ -295,27 +293,15 @@ var Render =
 		gl.viewport(0, 0, this.canvas.width, this.canvas.height);
 		gl.enable(gl.BLEND);
 		gl.blendEquation( gl.FUNC_ADD );
-		gl.clearColor(0.0, 0.0, 0.0, 1.0); // Black background
+		gl.clearColor(0.0, 0.0, 0.0, 1.0);
 		gl.clear(gl.COLOR_BUFFER_BIT);
 		gl.colorMask(true, true, true, true);
-
-		// Explicitly enable all required extensions to avoid WebGL warnings
 		var ext1 = gl.getExtension('OES_texture_float');
 		var ext2 = gl.getExtension('OES_texture_float_linear');
-		var ext3 = gl.getExtension('WEBGL_color_buffer_float');
-		var ext4 = gl.getExtension('EXT_float_blend');
-
-		if (!ext1 || !ext2) {
-			console.warn("WebGL float texture extensions not supported");
-		}
-		if (!ext3) {
-			console.warn("WEBGL_color_buffer_float extension not supported");
-		}
-		if (!ext4) {
-			console.warn("EXT_float_blend extension not supported");
-		}
-
+		//this.ext = gl.getExtension('OES_texture_half_float');
+		//this.ext2 = gl.getExtension('OES_texture_half_float_linear');
 		this.fadeAmount = 0.2*AudioSystem.bufferSize/512;
+
 
 		this.fullScreenQuad = new Float32Array([
 			-1, 1, 1, 1,  1,-1,  // Triangle 1
@@ -490,8 +476,14 @@ var Render =
 
 	getColourFromHue : function(hue)
 	{
-		// Override default color scheme with phosphor green for authentic oscilloscope
-		return [0.0, 1.0, 0.2]; // Phosphor green
+		var alpha = (hue/120.0) % 1.0;
+		var start = Math.sqrt(1.0-alpha);
+		var end = Math.sqrt(alpha);
+		var colour;
+		if (hue<120) colour = [start, end, 0.0];
+		else if (hue<240) colour = [0.0, start, end];
+		else colour = [end, 0.0, start];
+		return colour;
 	},
 
 	activateTargetTexture : function(texture)
@@ -604,13 +596,33 @@ var Render =
 		gl.bindTexture(gl.TEXTURE_2D, this.screenTexture);
 		gl.uniform1i(program.uScreen, 0);
 
+		// Check if we're showing baseline noise
+		var isShowingNoise = false;
+		if (typeof keyboardAudioManager !== 'undefined' && keyboardAudioManager) {
+			var status = keyboardAudioManager.getStatus();
+			isShowingNoise = status.activeSamples === 0;
+		}
+		
 		gl.uniform1f(program.uSize, 0.015);
-		gl.uniform1f(program.uGain, Math.pow(2.0,controls.mainGain)*450/512);
+		
+		// Adjust gain for baseline noise visibility
+		if (isShowingNoise) {
+			gl.uniform1f(program.uGain, 1.0); // Fixed gain for consistent baseline
+		} else {
+			gl.uniform1f(program.uGain, Math.pow(2.0,controls.mainGain)*450/512);
+		}
+		
 		if (controls.invertXY) gl.uniform1f(program.uInvert, -1.0);
 		else gl.uniform1f(program.uInvert, 1.0);
-		if (controls.disableFilter) gl.uniform1f(program.uIntensity, 0.005*(Filter.steps+1.5));
-		// +1.5 needed above for some reason for the brightness to match
-		else gl.uniform1f(program.uIntensity, 0.005);
+		
+		// Adjust intensity for baseline noise
+		if (isShowingNoise) {
+			gl.uniform1f(program.uIntensity, 0.003); // Dimmer for realistic baseline
+		} else if (controls.disableFilter) {
+			gl.uniform1f(program.uIntensity, 0.005*(Filter.steps+1.5));
+		} else {
+			gl.uniform1f(program.uIntensity, 0.005);
+		}
 		gl.uniform1f(program.uFadeAmount, this.fadeAmount);
 		gl.uniform1f(program.uNEdges, this.nEdges);
 
@@ -677,80 +689,61 @@ var Render =
 		this.activateTargetTexture(texture);
 		this.setNormalBlending();
 		this.setShader(this.simpleShader);
-		gl.colorMask(true, true, false, true); // Use green channel for grid
-		
-		// Clear the texture first to ensure clean background
-		gl.clearColor(0.0, 0.0, 0.0, 1.0);
-		gl.clear(gl.COLOR_BUFFER_BIT);
+		gl.colorMask(true, false, false, true);
 
 		var data = [];
-		var gridSize = 1.8; // Use normalized coordinates (-1 to 1)
-		var divisions = 10;  // Number of divisions
-		var step = gridSize / divisions;
-		
-		// Draw major grid lines
-		for (var i = -divisions/2; i <= divisions/2; i++) {
-			var pos = i * step;
-			
-			// Horizontal and vertical major grid lines
-			data.push(-gridSize/2, pos, gridSize/2, pos); // Horizontal
-			data.push(pos, -gridSize/2, pos, gridSize/2); // Vertical
-		}
-		
-		// Add minor grid lines (sub-divisions)
-		for (var i = -divisions/2; i < divisions/2; i++) {
-			var majorPos = i * step;
-			
-			for (var j = 1; j < 5; j++) { // 4 minor lines between each major
-				var minorPos = majorPos + (j * step / 5);
-				
-				// Shorter minor lines for better visual hierarchy
-				data.push(-gridSize/2 * 0.98, minorPos, gridSize/2 * 0.98, minorPos); // Horizontal minor
-				data.push(minorPos, -gridSize/2 * 0.98, minorPos, gridSize/2 * 0.98); // Vertical minor
+
+		for (var i=0; i<11; i++)
+		{
+			var step = 45;
+			var s = i*step;
+			data.splice(0,0, 0, s, 10*step, s);
+			data.splice(0,0, s, 0, s, 10*step);
+			if (i!=0 && i!=10)
+			{
+				for (var j=0; j<51; j++)
+				{
+					t = j*step/5;
+					if (i!=5)
+					{
+						data.splice(0,0, t, s-2, t, s+1);
+						data.splice(0,0, s-2, t, s+1, t);
+					}
+					else
+					{
+						data.splice(0,0, t, s-5, t, s+4);
+						data.splice(0,0, s-5, t, s+4, t);
+					}
+				}
 			}
 		}
-		
-		// Add center crosshair
-		var crosshairSize = 0.05;
-		data.push(-crosshairSize, 0, crosshairSize, 0); // Horizontal center
-		data.push(0, -crosshairSize, 0, crosshairSize); // Vertical center
-		
-		// Add circular reference guides
-		var radiusMax = gridSize / 2;
-		for (var r = step; r <= radiusMax; r += step) {
-			var segments = 64; // More segments for smoother circles
-			for (var i = 0; i < segments; i++) {
-				var angle1 = i * 2 * Math.PI / segments;
-				var angle2 = (i+1) * 2 * Math.PI / segments;
-				
-				var x1 = r * Math.cos(angle1);
-				var y1 = r * Math.sin(angle1);
-				var x2 = r * Math.cos(angle2);
-				var y2 = r * Math.sin(angle2);
-				
-				data.push(x1, y1, x2, y2);
-			}
+
+		for (var j=0; j<51; j++)
+		{
+			var t = j*step/5;
+			if (t%5 == 0) continue;
+			data.splice(0,0, t-2, 2.5*step, t+2, 2.5*step);
+			data.splice(0,0, t-2, 7.5*step, t+2, 7.5*step);
 		}
-		
+
+
 		var vertices = new Float32Array(data);
-		
+		for (var i=0; i<data.length; i++)
+		{
+			vertices[i]=(vertices[i]+31)/256-1;
+		}
+
+
 		gl.enableVertexAttribArray(this.program.vertexPosition);
 		gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-		gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+   		gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
 		gl.vertexAttribPointer(this.program.vertexPosition, 2, gl.FLOAT, false, 0, 0);
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
-		
-		 // Draw main grid lines (brighter)
-		gl.uniform4fv(this.program.colour, [0.0, 1.0, 0.0, 0.7]); // Bright green with higher opacity
+		gl.uniform4fv(this.program.colour, [0.01, 0.1, 0.01, 1.0]);
+
 		gl.lineWidth(1.0);
-		gl.drawArrays(gl.LINES, 0, vertices.length / 2);
-		
-		// Apply post-processing glow effect for authenticity
-		this.setAdditiveBlending();
-		gl.uniform4fv(this.program.colour, [0.0, 0.3, 0.0, 0.3]); // Softer glow
-		gl.lineWidth(2.0);
-		gl.drawArrays(gl.LINES, 0, divisions * 4); // Only main grid lines get glow
-		
+		gl.drawArrays(gl.LINES, 0, vertices.length/2);
+
 		gl.bindTexture(gl.TEXTURE_2D, this.targetTexture);
 		gl.generateMipmap(gl.TEXTURE_2D);
 		gl.colorMask(true, true, true, true);
@@ -760,12 +753,10 @@ var Render =
 	{
 		var texture = gl.createTexture();
 		gl.bindTexture(gl.TEXTURE_2D, texture);
-
-		// Pre-initialize texture to avoid lazy initialization warnings
-		var emptyData = new Float32Array(width * height * 4);
-		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.FLOAT, emptyData);
-
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.FLOAT, null);
+		//gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, Render.ext.HALF_FLOAT_OES, null);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		//gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -901,10 +892,138 @@ function doScriptProcessor(event)
 	var yOut = event.outputBuffer.getChannelData(1);
 
 	var length = xSamplesRaw.length;
+	
+	// Check if any audio is playing
+	var hasAudioInput = false;
+	for (var i=0; i<length; i++) {
+		if (Math.abs(xSamplesRaw[i]) > 0.0001 || Math.abs(ySamplesRaw[i]) > 0.0001) {
+			hasAudioInput = true;
+			break;
+		}
+	}
+	
+	// Check if keyboard audio is active
+	var isKeyboardActive = false;
+	if (typeof keyboardAudioManager !== 'undefined' && keyboardAudioManager) {
+		var status = keyboardAudioManager.getStatus();
+		isKeyboardActive = status.activeSamples > 0;
+	}
+	
+	// Variables for noise generation
+	var currentTime = Date.now() / 1000.0;
+	var disruption = Math.sin(currentTime * 0.7) * Math.sin(currentTime * 1.3);
+	var shouldDisrupt = Math.random() < 0.02; // 2% chance of disruption
+	var burstNoise = Math.random() < 0.005; // 0.5% chance of noise burst
+	
+	// Analog noise patterns
+	var analogPattern = Math.floor(currentTime * 0.1) % 10; // Changes every 10 seconds
+	var showAnalogNoise = Math.random() < 0.1; // 10% chance of analog patterns
+	var interferencePhase = currentTime * 15.7; // Non-harmonic frequency for beating
+	
 	for (var i=0; i<length; i++)
 	{
-		xSamples[i] = xSamplesRaw[i];
-		ySamples[i] = ySamplesRaw[i];
+		if (!hasAudioInput && !isKeyboardActive) {
+			// Generate horizontal line with realistic oscilloscope noise
+			// X sweeps from left to right with occasional disruptions
+			var xPosition = -1.0 + (2.0 * i / length);
+			
+			// Add occasional horizontal disruptions
+			if (shouldDisrupt && i > length * 0.3 && i < length * 0.4) {
+				xPosition += (Math.random() - 0.5) * 0.1;
+			}
+			
+			xSamples[i] = xPosition;
+			
+			// Y baseline noise with varying characteristics
+			var baseNoise = 0.008;
+			var noiseMultiplier = 1.0;
+			
+			// Occasional noise bursts
+			if (burstNoise && i > length * 0.5 && i < length * 0.6) {
+				noiseMultiplier = 5.0;
+			}
+			
+			// Varying noise intensity over time
+			noiseMultiplier *= (1.0 + disruption * 0.5);
+			
+			// Generate the noise
+			ySamples[i] = (Math.random() - 0.5) * baseNoise * noiseMultiplier;
+			
+			// Add multiple frequency components for realism
+			var time = currentTime + i * 0.00002;
+			
+			// 60Hz hum
+			ySamples[i] += Math.sin(time * 60 * 2 * Math.PI) * 0.002;
+			
+			// Low frequency drift
+			ySamples[i] += Math.sin(time * 0.5) * 0.003;
+			
+			// High frequency noise
+			ySamples[i] += (Math.random() - 0.5) * 0.001;
+			
+			// Analog noise patterns
+			if (showAnalogNoise) {
+				switch(analogPattern) {
+					case 0: // Oscillating interference pattern
+						ySamples[i] += Math.sin(time * 127) * Math.cos(time * 73) * 0.02;
+						xSamples[i] += Math.sin(time * 89) * 0.01;
+						break;
+					case 1: // Sawtooth drift
+						var sawPhase = (time * 2.3) % 1.0;
+						ySamples[i] += (sawPhase - 0.5) * 0.03;
+						break;
+					case 2: // Radio frequency interference
+						ySamples[i] += Math.sin(interferencePhase + i * 0.1) * 
+						              Math.sin(time * 1000) * 0.015;
+						break;
+					case 3: // Power supply ripple
+						ySamples[i] += Math.sin(time * 120 * Math.PI) * 0.01 +
+						              Math.sin(time * 240 * Math.PI) * 0.005;
+						break;
+					case 4: // Analog crosstalk simulation
+						var crosstalk = Math.sin(time * 33) * Math.sin(time * 77);
+						ySamples[i] += crosstalk * 0.025;
+						xSamples[i] += crosstalk * 0.005;
+						break;
+					case 5: // Thermal noise burst
+						if (i % 10 < 3) {
+							ySamples[i] += (Math.random() - 0.5) * 0.04;
+						}
+						break;
+					case 6: // Oscillation decay pattern
+						var decay = Math.exp(-((i - length/2) * (i - length/2)) / (length * length * 0.1));
+						ySamples[i] += Math.sin(time * 200 + i * 0.5) * decay * 0.03;
+						break;
+					case 7: // Ground loop hum with harmonics
+						for (var h = 1; h <= 5; h++) {
+							ySamples[i] += Math.sin(time * 60 * h * 2 * Math.PI) * 0.003 / h;
+						}
+						break;
+					case 8: // Analog switch bounce
+						if (Math.random() < 0.01) {
+							ySamples[i] += (Math.random() - 0.5) * 0.1 * Math.exp(-i * 0.01);
+						}
+						break;
+					case 9: // Mixed frequency beating
+						ySamples[i] += (Math.sin(time * 97) + Math.sin(time * 103)) * 0.01;
+						break;
+				}
+			}
+			
+			// Occasional spikes
+			if (Math.random() < 0.0005) {
+				ySamples[i] += (Math.random() - 0.5) * 0.05;
+			}
+			
+			// Random discontinuities
+			if (Math.random() < 0.001) {
+				xSamples[i] = Math.random() * 2.0 - 1.0;
+				ySamples[i] = Math.random() * 0.1 - 0.05;
+			}
+		} else {
+			xSamples[i] = xSamplesRaw[i];
+			ySamples[i] = ySamplesRaw[i];
+		}
 	}
 
     if (controls.sweepOn)
@@ -947,7 +1066,6 @@ function doScriptProcessor(event)
 		yOut[i] = ySamplesRaw[i];
 	}
 
-	// Get volume from controls
 	AudioSystem.audioVolumeNode.gain.value = controls.audioVolume;
 }
 
@@ -959,3 +1077,29 @@ function drawCRTFrame(timeStamp)
 
 var xSamples = new Float32Array(1024);
 var ySamples = new Float32Array(1024);
+UI.init();
+Render.init();
+
+window.addEventListener('load', function() {
+	//Filter.init(512, 10, 4);
+	Filter.init(1024, 8, 6);
+	AudioSystem.init(1024);
+	Render.setupArrays(Filter.nSmoothedSamples);
+	AudioSystem.startSound();
+	requestAnimationFrame(drawCRTFrame);
+	Controls.setupControls();
+	
+	// Initialize keyboard audio manager
+	keyboardAudioManager = new KeyboardAudioManager();
+	keyboardAudioManager.init().then(() => {
+		console.log("Keyboard audio manager initialized");
+		document.getElementById("keyboardStatus").innerHTML = 
+			'<p>Keyboard controls ready! Press keys to play audio samples.</p>' +
+			'<div id="activeKeys" style="font-family: monospace; color: #00ff00; margin: 5px 0;"></div>' +
+			'<div id="keyMapDisplay" style="font-size: 10px; color: #666; margin-top: 10px;"></div>';
+	}).catch(error => {
+		console.error("Failed to initialize keyboard audio manager:", error);
+		document.getElementById("keyboardStatus").innerHTML = 
+			'<p style="color: red;">Failed to load keyboard controls. Check console for details.</p>';
+	});
+});

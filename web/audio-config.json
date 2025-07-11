@@ -1,0 +1,29 @@
+{
+  "mappings": {
+    "a": "../audio/Asset 2.wav",
+    "s": "../audio/Asset 3.wav",
+    "d": "../audio/Asset 4.wav",
+    "f": "../audio/Asset 5.wav",
+    "g": "../audio/Asset 6.wav",
+    "h": "../audio/Asset 7.wav",
+    "j": "../audio/Asset 8.wav",
+    "k": "../audio/Asset 9.wav",
+    "l": "../audio/Asset 11.wav",
+    "q": "../audio/Asset 12.wav",
+    "w": "../audio/Asset 13.wav",
+    "e": "../audio/Asset 15.wav",
+    "r": "../audio/Asset 16.wav",
+    "t": "../audio/Asset 17.wav",
+    "y": "../audio/Asset 18.wav",
+    "u": "../audio/Asset 19.wav",
+    "i": "../audio/Asset 32.wav",
+    "o": "../audio/Asset 33.wav",
+    "p": "../audio/Asset 40.wav",
+    "z": "../audio/Asset 41.wav"
+  },
+  "settings": {
+    "fadeInTime": 0.01,
+    "fadeOutTime": 0.05,
+    "defaultVolume": 0.8
+  }
+}

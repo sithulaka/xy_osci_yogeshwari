@@ -1,0 +1,30 @@
+{
+  "mappings": {
+    "a": "../tones/261Hz.wav",
+    "s": "../tones/277Hz.wav",
+    "d": "../tones/293Hz.wav",
+    "f": "../tones/311Hz.wav",
+    "g": "../tones/329Hz.wav",
+    "h": "../tones/349Hz.wav",
+    "j": "../tones/369Hz.wav",
+    "k": "../tones/392Hz.wav",
+    "l": "../tones/415Hz.wav",
+    "q": "../tones/440Hz.wav",
+    "w": "../tones/466Hz.wav",
+    "e": "../tones/493Hz.wav",
+    "r": "../tones/sound_261Hz.wav",
+    "t": "../tones/sound_277Hz.wav",
+    "y": "../tones/sound_293Hz.wav",
+    "u": "../tones/sound_311Hz.wav",
+    "i": "../tones/sound_329Hz.wav",
+    "o": "../tones/sound_349Hz.wav",
+    "p": "../tones/sound_369Hz.wav",
+    "z": "../tones/sound_392Hz.wav",
+    "x": "../tones/sound_415Hz.wav"
+  },
+  "settings": {
+    "fadeInTime": 0.01,
+    "fadeOutTime": 0.05,
+    "defaultVolume": 0.6
+  }
+}
