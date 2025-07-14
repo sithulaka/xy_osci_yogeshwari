@@ -2,22 +2,17 @@ class KeyboardAudioManager {
     constructor() {
         this.audioContext = null;
         this.audioBuffers = {};
-        this.toneBuffers = {};
         this.activeNotes = {};
-        this.activeTones = {};
         this.config = null;
-        this.toneConfig = null;
         this.scopeNode = null;
         this.outputNode = null;
         this.pressedKeys = new Set();
-        this.originalAudioVolume = undefined;
     }
 
     async init() {
         try {
             // Load configurations
             this.config = await this.loadConfig();
-            this.toneConfig = await this.loadToneConfig();
             
             // Wait for AudioSystem to be initialized
             this.audioContext = AudioSystem.audioContext;
@@ -26,7 +21,6 @@ class KeyboardAudioManager {
             
             // Preload all audio files
             await this.preloadAudioFiles();
-            await this.preloadToneFiles();
             
             // Setup keyboard listeners
             this.setupKeyboardListeners();
@@ -46,10 +40,6 @@ class KeyboardAudioManager {
         return await response.json();
     }
 
-    async loadToneConfig() {
-        const response = await fetch('tone-config.json');
-        return await response.json();
-    }
 
     async preloadAudioFiles() {
         const loadPromises = [];
@@ -63,17 +53,6 @@ class KeyboardAudioManager {
         console.log(`Loaded ${Object.keys(this.audioBuffers).length} audio files`);
     }
 
-    async preloadToneFiles() {
-        const loadPromises = [];
-        
-        for (const [key, filepath] of Object.entries(this.toneConfig.mappings)) {
-            const loadPromise = this.loadToneFile(key, filepath);
-            loadPromises.push(loadPromise);
-        }
-        
-        await Promise.all(loadPromises);
-        console.log(`Loaded ${Object.keys(this.toneBuffers).length} tone files`);
-    }
 
     async loadAudioFile(key, filepath) {
         try {
@@ -87,24 +66,86 @@ class KeyboardAudioManager {
         }
     }
 
-    async loadToneFile(key, filepath) {
-        try {
-            const response = await fetch(filepath);
-            const arrayBuffer = await response.arrayBuffer();
-            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-            this.toneBuffers[key] = audioBuffer;
-            console.log(`Loaded tone: ${filepath} for key: ${key}`);
-        } catch (error) {
-            console.error(`Failed to load tone ${filepath}:`, error);
-        }
-    }
 
     setupKeyboardListeners() {
-        document.addEventListener('keydown', (e) => this.handleKeyDown(e));
-        document.addEventListener('keyup', (e) => this.handleKeyUp(e));
+        // Connect to Python WebSocket server for hardware key detection
+        this.connectToPythonServer();
         
         // Handle window blur to stop all sounds
         window.addEventListener('blur', () => this.stopAllNotes());
+    }
+    
+    connectToPythonServer() {
+        const wsUrl = 'ws://localhost:8765';
+        console.log(`Connecting to Python key detector at ${wsUrl}`);
+        
+        this.websocket = new WebSocket(wsUrl);
+        
+        this.websocket.onopen = () => {
+            console.log('Connected to Python key detector');
+            this.updateConnectionStatus('connected');
+        };
+        
+        this.websocket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                this.handleWebSocketMessage(data);
+            } catch (error) {
+                console.error('Error parsing WebSocket message:', error);
+            }
+        };
+        
+        this.websocket.onclose = () => {
+            console.log('Disconnected from Python key detector');
+            this.updateConnectionStatus('disconnected');
+            
+            // Try to reconnect after 3 seconds
+            setTimeout(() => {
+                console.log('Attempting to reconnect...');
+                this.connectToPythonServer();
+            }, 3000);
+        };
+        
+        this.websocket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            this.updateConnectionStatus('error');
+        };
+    }
+    
+    handleWebSocketMessage(data) {
+        switch (data.type) {
+            case 'keydown':
+                this.handlePythonKeyDown(data.key);
+                break;
+            case 'keyup':
+                this.handlePythonKeyUp(data.key);
+                break;
+            case 'status':
+                console.log('Key detector status:', data);
+                break;
+            default:
+                console.log('Unknown message type:', data.type);
+        }
+    }
+    
+    updateConnectionStatus(status) {
+        const statusElement = document.getElementById('connectionStatus');
+        if (statusElement) {
+            switch (status) {
+                case 'connected':
+                    statusElement.textContent = 'Python Key Detector: Connected';
+                    statusElement.style.color = '#00ff00';
+                    break;
+                case 'disconnected':
+                    statusElement.textContent = 'Python Key Detector: Disconnected';
+                    statusElement.style.color = '#ff6600';
+                    break;
+                case 'error':
+                    statusElement.textContent = 'Python Key Detector: Error';
+                    statusElement.style.color = '#ff0000';
+                    break;
+            }
+        }
     }
 
     setupVisualFeedback() {
@@ -118,31 +159,27 @@ class KeyboardAudioManager {
         }
     }
 
-    handleKeyDown(event) {
-        // Ignore if key is already pressed or if typing in input
-        if (this.pressedKeys.has(event.code) || event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+    handlePythonKeyDown(key) {
+        // Ignore if key is already pressed
+        if (this.pressedKeys.has(key)) {
             return;
         }
         
-        const key = event.key.toLowerCase();
         if (this.audioBuffers[key] && !this.activeNotes[key]) {
             // Stop all currently playing notes before starting a new one
             this.stopAllNotes();
             
-            this.pressedKeys.add(event.code);
+            this.pressedKeys.add(key);
             this.startNote(key);
-            this.startTone(key);
             this.updateVisualFeedback();
         }
     }
 
-    handleKeyUp(event) {
-        this.pressedKeys.delete(event.code);
+    handlePythonKeyUp(key) {
+        this.pressedKeys.delete(key);
         
-        const key = event.key.toLowerCase();
         if (this.activeNotes[key]) {
             this.stopNote(key);
-            this.stopTone(key);
             this.updateVisualFeedback();
         }
     }
@@ -157,7 +194,7 @@ class KeyboardAudioManager {
             source.buffer = buffer;
             source.loop = true;
             
-            // Create gain node with normal gain for oscilloscope display
+            // Create gain node with normal gain for both display and audio output
             const gainNode = this.audioContext.createGain();
             gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
             gainNode.gain.linearRampToValueAtTime(
@@ -165,15 +202,9 @@ class KeyboardAudioManager {
                 this.audioContext.currentTime + this.config.settings.fadeInTime
             );
             
-            // Connect to the existing oscilloscope audio chain (same as original)
+            // Connect to the existing oscilloscope audio chain for both display and audio
             source.connect(gainNode);
             gainNode.connect(this.scopeNode);
-            
-            // Temporarily store original audio volume and mute it
-            if (!this.originalAudioVolume) {
-                this.originalAudioVolume = controls.audioVolume;
-            }
-            controls.audioVolume = 0; // Mute the final output
             
             // Start playback
             source.start();
@@ -184,7 +215,7 @@ class KeyboardAudioManager {
                 gainNode: gainNode
             };
             
-            console.log(`Started note (display only): ${key}`);
+            console.log(`Started note with audio: ${key}`);
         } catch (error) {
             console.error(`Failed to start note ${key}:`, error);
         }
@@ -207,13 +238,6 @@ class KeyboardAudioManager {
             // Remove reference after stop
             setTimeout(() => {
                 delete this.activeNotes[key];
-                
-                // If no more audio notes are playing, restore original audio volume
-                if (Object.keys(this.activeNotes).length === 0 && this.originalAudioVolume !== undefined) {
-                    controls.audioVolume = this.originalAudioVolume;
-                    this.originalAudioVolume = undefined;
-                }
-                
                 this.updateVisualFeedback();
             }, this.config.settings.fadeOutTime * 1000);
             
@@ -223,80 +247,10 @@ class KeyboardAudioManager {
         }
     }
 
-    startTone(key) {
-        const buffer = this.toneBuffers[key];
-        if (!buffer) return;
-
-        try {
-            // Create audio source
-            const source = this.audioContext.createBufferSource();
-            source.buffer = buffer;
-            source.loop = true;
-            
-            // Create gain node for fade in/out
-            const gainNode = this.audioContext.createGain();
-            gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-            gainNode.gain.linearRampToValueAtTime(
-                this.toneConfig.settings.defaultVolume, 
-                this.audioContext.currentTime + this.toneConfig.settings.fadeInTime
-            );
-            
-            // Connect directly to audio destination, bypassing the main volume control
-            source.connect(gainNode);
-            gainNode.connect(this.audioContext.destination);
-            
-            // Start playback
-            source.start();
-            
-            // Store references
-            this.activeTones[key] = {
-                source: source,
-                gainNode: gainNode
-            };
-            
-            console.log(`Started tone: ${key}`);
-        } catch (error) {
-            console.error(`Failed to start tone ${key}:`, error);
-        }
-    }
-
-    stopTone(key) {
-        const tone = this.activeTones[key];
-        if (!tone) return;
-
-        try {
-            // Fade out
-            const now = this.audioContext.currentTime;
-            tone.gainNode.gain.cancelScheduledValues(now);
-            tone.gainNode.gain.setValueAtTime(tone.gainNode.gain.value, now);
-            tone.gainNode.gain.linearRampToValueAtTime(0, now + this.toneConfig.settings.fadeOutTime);
-            
-            // Stop and cleanup
-            tone.source.stop(now + this.toneConfig.settings.fadeOutTime);
-            
-            // Remove reference after stop
-            setTimeout(() => {
-                delete this.activeTones[key];
-            }, this.toneConfig.settings.fadeOutTime * 1000);
-            
-            console.log(`Stopped tone: ${key}`);
-        } catch (error) {
-            console.error(`Failed to stop tone ${key}:`, error);
-        }
-    }
 
     stopAllNotes() {
         const keys = Object.keys(this.activeNotes);
         keys.forEach(key => this.stopNote(key));
-        
-        const toneKeys = Object.keys(this.activeTones);
-        toneKeys.forEach(key => this.stopTone(key));
-        
-        // Restore original audio volume immediately when stopping all
-        if (this.originalAudioVolume !== undefined) {
-            controls.audioVolume = this.originalAudioVolume;
-            this.originalAudioVolume = undefined;
-        }
         
         this.pressedKeys.clear();
     }
@@ -305,10 +259,8 @@ class KeyboardAudioManager {
         const activeKeysDiv = document.getElementById('activeKeys');
         if (activeKeysDiv) {
             const keys = Object.keys(this.activeNotes);
-            const toneKeys = Object.keys(this.activeTones);
-            const allKeys = [...new Set([...keys, ...toneKeys])];
             
-            if (allKeys.length > 0) {
+            if (keys.length > 0) {
                 activeKeysDiv.textContent = '';
                 activeKeysDiv.style.display = 'none';
             } else {
@@ -319,17 +271,12 @@ class KeyboardAudioManager {
 
     updateKeyMapDisplay() {
         const keyMapDiv = document.getElementById('keyMapDisplay');
-        if (keyMapDiv && this.config && this.toneConfig) {
+        if (keyMapDiv && this.config) {
             let html = '<strong>Key Mappings:</strong><br>';
-            html += '<div style="margin-bottom: 10px;">Oscilloscope Display (from audio/):</div>';
+            html += '<div style="margin-bottom: 10px;">Audio Samples (from audio/):</div>';
             for (const [key, filepath] of Object.entries(this.config.mappings)) {
                 const filename = filepath.split('/').pop();
                 html += `<span style="display: inline-block; margin: 2px 5px; color: #00ff00;">${key.toUpperCase()} → ${filename}</span>`;
-            }
-            html += '<div style="margin: 10px 0 5px 0;">Tone Playback (from tones/):</div>';
-            for (const [key, filepath] of Object.entries(this.toneConfig.mappings)) {
-                const filename = filepath.split('/').pop();
-                html += `<span style="display: inline-block; margin: 2px 5px; color: #ffaa00;">${key.toUpperCase()} → ${filename}</span>`;
             }
             keyMapDiv.innerHTML = html;
         }
@@ -339,9 +286,7 @@ class KeyboardAudioManager {
     getStatus() {
         return {
             loadedSamples: Object.keys(this.audioBuffers).length,
-            loadedTones: Object.keys(this.toneBuffers).length,
             activeSamples: Object.keys(this.activeNotes).length,
-            activeTones: Object.keys(this.activeTones).length,
             pressedKeys: Array.from(this.pressedKeys),
             isInitialized: this.audioContext !== null
         };

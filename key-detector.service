@@ -1,0 +1,30 @@
+[Unit]
+Description=XY Oscilloscope Key Detector WebSocket Server
+After=network.target graphical.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=cyber
+Group=cyber
+WorkingDirectory=/home/cyber/xy_osci_yogeshwari
+ExecStart=/usr/bin/python3 key_detector.py
+
+# Critical X11 environment variables
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/cyber/.Xauthority
+Environment=PYTHONUNBUFFERED=1
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/cyber/xy_osci_yogeshwari
+
+# Restart policy
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

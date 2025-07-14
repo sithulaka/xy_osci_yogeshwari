@@ -607,7 +607,7 @@ var Render =
 		
 		// Adjust gain for baseline noise visibility
 		if (isShowingNoise) {
-			gl.uniform1f(program.uGain, 1.0); // Fixed gain for consistent baseline
+			gl.uniform1f(program.uGain, 15.0); // Very high gain for noise visibility
 		} else {
 			gl.uniform1f(program.uGain, Math.pow(2.0,controls.mainGain)*450/512);
 		}
@@ -617,7 +617,7 @@ var Render =
 		
 		// Adjust intensity for baseline noise
 		if (isShowingNoise) {
-			gl.uniform1f(program.uIntensity, 0.003); // Dimmer for realistic baseline
+			gl.uniform1f(program.uIntensity, 0.0005); // Very low intensity for subtle noise
 		} else if (controls.disableFilter) {
 			gl.uniform1f(program.uIntensity, 0.005*(Filter.steps+1.5));
 		} else {
@@ -884,6 +884,90 @@ var Render =
 var sweepPosition = -1;
 var belowTrigger = false;
 
+// Noise generation state
+var noiseState = {
+	xOffset: 0,
+	yOffset: 0,
+	noisePhase: 0,
+	driftX: 0,
+	driftY: 0,
+	lastUpdate: 0
+};
+
+function generateBaselineNoise(xSamples, ySamples, length, currentTime) {
+	// Update noise state periodically
+	if (currentTime - noiseState.lastUpdate > 0.1) {
+		noiseState.driftX += (Math.random() - 0.5) * 0.00002;
+		noiseState.driftY += (Math.random() - 0.5) * 0.00002;
+		
+		// Constrain drift to keep noise dot near center
+		noiseState.driftX = Math.max(-0.001, Math.min(0.001, noiseState.driftX));
+		noiseState.driftY = Math.max(-0.001, Math.min(0.001, noiseState.driftY));
+		
+		noiseState.lastUpdate = currentTime;
+	}
+	
+	// Generate XY mode baseline noise - random lines in X and Y directions
+	// Randomly choose direction for this buffer
+	var isHorizontalLine = Math.random() < 0.5;
+	var isVerticalLine = Math.random() < 0.5;
+	
+	// Base position (center of screen)
+	var baseX = 0.0;
+	var baseY = 0.0;
+	
+	// Random offset for the entire noise pattern
+	var offsetX = (Math.random() - 0.5) * 0.002;
+	var offsetY = (Math.random() - 0.5) * 0.002;
+	
+	// Slow drift
+	var driftX = noiseState.driftX * Math.sin(currentTime * 0.1);
+	var driftY = noiseState.driftY * Math.cos(currentTime * 0.15);
+	
+	for (var i = 0; i < length; i++) {
+		// High frequency thermal noise
+		var thermalX = (Math.random() - 0.5) * 0.0008;
+		var thermalY = (Math.random() - 0.5) * 0.0008;
+		
+		// Random line generation
+		var lineX = 0, lineY = 0;
+		
+		// Randomly draw horizontal lines
+		if (isHorizontalLine && Math.random() < 0.3) {
+			lineX = (Math.random() - 0.5) * 0.01; // Random X position along line
+			lineY = (Math.random() - 0.5) * 0.0005; // Very small Y variation
+		}
+		
+		// Randomly draw vertical lines
+		if (isVerticalLine && Math.random() < 0.3) {
+			lineX = (Math.random() - 0.5) * 0.0005; // Very small X variation
+			lineY = (Math.random() - 0.5) * 0.01; // Random Y position along line
+		}
+		
+		// Random diagonal lines
+		if (Math.random() < 0.1) {
+			var lineLength = (Math.random() - 0.5) * 0.008;
+			lineX = lineLength * Math.cos(Math.random() * 6.28);
+			lineY = lineLength * Math.sin(Math.random() * 6.28);
+		}
+		
+		// 60Hz hum - very subtle
+		var humX = Math.sin(currentTime * 377 + i * 0.01) * 0.0003;
+		var humY = Math.sin(currentTime * 377 + i * 0.01 + 1.57) * 0.0003;
+		
+		// Random glitches
+		var glitchX = 0, glitchY = 0;
+		if (Math.random() < 0.001) {
+			glitchX = (Math.random() - 0.5) * 0.003;
+			glitchY = (Math.random() - 0.5) * 0.003;
+		}
+		
+		// Combine all components
+		xSamples[i] = baseX + offsetX + driftX + thermalX + lineX + humX + glitchX;
+		ySamples[i] = baseY + offsetY + driftY + thermalY + lineY + humY + glitchY;
+	}
+}
+
 function doScriptProcessor(event)
 {
 	var xSamplesRaw = event.inputBuffer.getChannelData(0);
@@ -909,118 +993,16 @@ function doScriptProcessor(event)
 		isKeyboardActive = status.activeSamples > 0;
 	}
 	
-	// Variables for noise generation
+	// Get current time for noise generation
 	var currentTime = Date.now() / 1000.0;
-	var disruption = Math.sin(currentTime * 0.7) * Math.sin(currentTime * 1.3);
-	var shouldDisrupt = Math.random() < 0.02; // 2% chance of disruption
-	var burstNoise = Math.random() < 0.005; // 0.5% chance of noise burst
 	
-	// Analog noise patterns
-	var analogPattern = Math.floor(currentTime * 0.1) % 10; // Changes every 10 seconds
-	var showAnalogNoise = Math.random() < 0.1; // 10% chance of analog patterns
-	var interferencePhase = currentTime * 15.7; // Non-harmonic frequency for beating
-	
-	for (var i=0; i<length; i++)
-	{
-		if (!hasAudioInput && !isKeyboardActive) {
-			// Generate horizontal line with realistic oscilloscope noise
-			// X sweeps from left to right with occasional disruptions
-			var xPosition = -1.0 + (2.0 * i / length);
-			
-			// Add occasional horizontal disruptions
-			if (shouldDisrupt && i > length * 0.3 && i < length * 0.4) {
-				xPosition += (Math.random() - 0.5) * 0.1;
-			}
-			
-			xSamples[i] = xPosition;
-			
-			// Y baseline noise with varying characteristics
-			var baseNoise = 0.008;
-			var noiseMultiplier = 1.0;
-			
-			// Occasional noise bursts
-			if (burstNoise && i > length * 0.5 && i < length * 0.6) {
-				noiseMultiplier = 5.0;
-			}
-			
-			// Varying noise intensity over time
-			noiseMultiplier *= (1.0 + disruption * 0.5);
-			
-			// Generate the noise
-			ySamples[i] = (Math.random() - 0.5) * baseNoise * noiseMultiplier;
-			
-			// Add multiple frequency components for realism
-			var time = currentTime + i * 0.00002;
-			
-			// 60Hz hum
-			ySamples[i] += Math.sin(time * 60 * 2 * Math.PI) * 0.002;
-			
-			// Low frequency drift
-			ySamples[i] += Math.sin(time * 0.5) * 0.003;
-			
-			// High frequency noise
-			ySamples[i] += (Math.random() - 0.5) * 0.001;
-			
-			// Analog noise patterns
-			if (showAnalogNoise) {
-				switch(analogPattern) {
-					case 0: // Oscillating interference pattern
-						ySamples[i] += Math.sin(time * 127) * Math.cos(time * 73) * 0.02;
-						xSamples[i] += Math.sin(time * 89) * 0.01;
-						break;
-					case 1: // Sawtooth drift
-						var sawPhase = (time * 2.3) % 1.0;
-						ySamples[i] += (sawPhase - 0.5) * 0.03;
-						break;
-					case 2: // Radio frequency interference
-						ySamples[i] += Math.sin(interferencePhase + i * 0.1) * 
-						              Math.sin(time * 1000) * 0.015;
-						break;
-					case 3: // Power supply ripple
-						ySamples[i] += Math.sin(time * 120 * Math.PI) * 0.01 +
-						              Math.sin(time * 240 * Math.PI) * 0.005;
-						break;
-					case 4: // Analog crosstalk simulation
-						var crosstalk = Math.sin(time * 33) * Math.sin(time * 77);
-						ySamples[i] += crosstalk * 0.025;
-						xSamples[i] += crosstalk * 0.005;
-						break;
-					case 5: // Thermal noise burst
-						if (i % 10 < 3) {
-							ySamples[i] += (Math.random() - 0.5) * 0.04;
-						}
-						break;
-					case 6: // Oscillation decay pattern
-						var decay = Math.exp(-((i - length/2) * (i - length/2)) / (length * length * 0.1));
-						ySamples[i] += Math.sin(time * 200 + i * 0.5) * decay * 0.03;
-						break;
-					case 7: // Ground loop hum with harmonics
-						for (var h = 1; h <= 5; h++) {
-							ySamples[i] += Math.sin(time * 60 * h * 2 * Math.PI) * 0.003 / h;
-						}
-						break;
-					case 8: // Analog switch bounce
-						if (Math.random() < 0.01) {
-							ySamples[i] += (Math.random() - 0.5) * 0.1 * Math.exp(-i * 0.01);
-						}
-						break;
-					case 9: // Mixed frequency beating
-						ySamples[i] += (Math.sin(time * 97) + Math.sin(time * 103)) * 0.01;
-						break;
-				}
-			}
-			
-			// Occasional spikes
-			if (Math.random() < 0.0005) {
-				ySamples[i] += (Math.random() - 0.5) * 0.05;
-			}
-			
-			// Random discontinuities
-			if (Math.random() < 0.001) {
-				xSamples[i] = Math.random() * 2.0 - 1.0;
-				ySamples[i] = Math.random() * 0.1 - 0.05;
-			}
-		} else {
+	// Generate baseline noise when no input is detected
+	if (!hasAudioInput && !isKeyboardActive) {
+		generateBaselineNoise(xSamples, ySamples, length, currentTime);
+		// Debug log (remove after testing)
+		if (Math.random() < 0.01) console.log("Generating baseline noise");
+	} else {
+		for (var i=0; i<length; i++) {
 			xSamples[i] = xSamplesRaw[i];
 			ySamples[i] = ySamplesRaw[i];
 		}
@@ -1089,17 +1071,33 @@ window.addEventListener('load', function() {
 	requestAnimationFrame(drawCRTFrame);
 	Controls.setupControls();
 	
-	// Initialize keyboard audio manager
-	keyboardAudioManager = new KeyboardAudioManager();
-	keyboardAudioManager.init().then(() => {
-		console.log("Keyboard audio manager initialized");
-		document.getElementById("keyboardStatus").innerHTML = 
-			'<p>Keyboard controls ready! Press keys to play audio samples.</p>' +
-			'<div id="activeKeys" style="font-family: monospace; color: #00ff00; margin: 5px 0;"></div>' +
-			'<div id="keyMapDisplay" style="font-size: 10px; color: #666; margin-top: 10px;"></div>';
-	}).catch(error => {
-		console.error("Failed to initialize keyboard audio manager:", error);
-		document.getElementById("keyboardStatus").innerHTML = 
-			'<p style="color: red;">Failed to load keyboard controls. Check console for details.</p>';
-	});
+	// Initialize keyboard audio manager (Eel version)
+	if (typeof KeyboardAudioManagerEel !== 'undefined') {
+		keyboardAudioManager = new KeyboardAudioManagerEel();
+		keyboardAudioManager.init().then(() => {
+			console.log("Keyboard audio manager (Eel) initialized");
+			document.getElementById("keyboardStatus").innerHTML = 
+				'<p>Keyboard controls ready! Press keys to play audio samples.</p>' +
+				'<div id="activeKeys" style="font-family: monospace; color: #00ff00; margin: 5px 0;"></div>' +
+				'<div id="keyMapDisplay" style="font-size: 10px; color: #666; margin-top: 10px;"></div>';
+		}).catch(error => {
+			console.error("Failed to initialize keyboard audio manager:", error);
+			document.getElementById("keyboardStatus").innerHTML = 
+				'<p style="color: red;">Failed to load keyboard controls. Check console for details.</p>';
+		});
+	} else {
+		// Fallback to original WebSocket version
+		keyboardAudioManager = new KeyboardAudioManager();
+		keyboardAudioManager.init().then(() => {
+			console.log("Keyboard audio manager initialized");
+			document.getElementById("keyboardStatus").innerHTML = 
+				'<p>Keyboard controls ready! Press keys to play audio samples.</p>' +
+				'<div id="activeKeys" style="font-family: monospace; color: #00ff00; margin: 5px 0;"></div>' +
+				'<div id="keyMapDisplay" style="font-size: 10px; color: #666; margin-top: 10px;"></div>';
+		}).catch(error => {
+			console.error("Failed to initialize keyboard audio manager:", error);
+			document.getElementById("keyboardStatus").innerHTML = 
+				'<p style="color: red;">Failed to load keyboard controls. Check console for details.</p>';
+		});
+	}
 });
